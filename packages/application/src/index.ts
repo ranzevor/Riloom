@@ -361,7 +361,7 @@ export class Application {
       );
       const saved = this.edit(
         tx,
-        {
+        validateRequest({
           ...request,
           command: "riloom.project.saveDraft",
           arguments: {
@@ -375,7 +375,7 @@ export class Application {
             editGeneration: (previous?.editGeneration ?? 0) + 1,
             changes,
           },
-        },
+        }),
         operationId,
       );
       const draft = saved.draft as Draft;

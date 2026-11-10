@@ -20,7 +20,9 @@ export function Viewport({
   const canvas = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<SceneRenderer | null>(null);
   const [images, setImages] = useState<ScenePixels>(new Map());
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
+  const error = loadError ?? renderError;
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<ViewTransform | null>(null);
   const scene = useRef({ model, images, zoom });
@@ -46,12 +48,14 @@ export function Viewport({
       .then((entries) => {
         if (active) {
           setImages(new Map(entries));
-          setError(null);
+          setLoadError(null);
         }
       })
       .catch((reason) => {
         if (active)
-          setError(reason instanceof Error ? reason.message : "素材读取失败");
+          setLoadError(
+            reason instanceof Error ? reason.message : "素材读取失败",
+          );
       });
     return () => {
       active = false;
@@ -66,18 +70,21 @@ export function Viewport({
         setView(
           renderer.current.draw(current.model, current.images, current.zoom),
         );
+        setRenderError(null);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "视口初始化失败");
+        setView(null);
+        setRenderError(
+          reason instanceof Error ? reason.message : "视口初始化失败",
+        );
       }
     };
     const lost = (event: Event) => {
       event.preventDefault();
       renderer.current?.dispose();
       renderer.current = null;
-      setError("图形上下文已丢失，正在等待恢复");
+      setRenderError("图形上下文已丢失，正在等待恢复");
     };
     const restored = () => {
-      setError(null);
       draw();
     };
     element.addEventListener("webglcontextlost", lost);
@@ -98,8 +105,12 @@ export function Viewport({
     if (renderer.current) {
       try {
         setView(renderer.current.draw(model, images, zoom));
+        setRenderError(null);
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "视口绘制失败");
+        setView(null);
+        setRenderError(
+          reason instanceof Error ? reason.message : "视口绘制失败",
+        );
       }
     }
   }, [model, images, zoom]);

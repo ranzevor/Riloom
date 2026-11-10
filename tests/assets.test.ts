@@ -15,10 +15,12 @@ import { sampleComposite, hitTest } from "../packages/renderer/dist/index.js";
 import type {
   Asset,
   Candidate,
+  Change,
+  Draft,
   DrawItem,
   ProjectModel,
 } from "../packages/contracts/dist/index.js";
-import { fixture, request, success } from "./helpers.js";
+import { fixture, parameter, request, success } from "./helpers.js";
 
 const bytes = Buffer.from([
   255, 0, 0, 255, 10, 20, 30, 1, 101, 102, 103, 0, 0, 0, 255, 128,
@@ -503,3 +505,160 @@ it("rejects asset dimensions that disagree with the registered source", () => {
     error: { code: "INVALID_INPUT" },
   });
 });
+
+it("rejects an import beyond the draft limit without changing saved resources", () => {
+  const { test, projectId } = setup();
+  applyImported(test, projectId);
+  const model = test.project(projectId).model;
+  const changes = Array.from(
+    { length: 128 },
+    (_, index) => index,
+  ).flatMap<Change>((index) => {
+    const asset = { ...model.assets![0]!, id: `asset-${index}` };
+    const drawing = {
+      ...model.drawItems![0]!,
+      id: `drawing-${index}`,
+      assetId: asset.id,
+      orderToken: `order-${index}`,
+    };
+    return [
+      { type: "addAsset", after: asset },
+      { type: "addDrawItem", after: drawing },
+    ];
+  });
+  const draft = success(test.save(projectId, changes)).result.draft as Draft;
+  expect(draft.changes).toHaveLength(256);
+  const registered = test.store.openProject(projectId).read((tx) => tx.blobs());
+  const input = request(
+    "riloom.asset.import",
+    {
+      name: "超额图层",
+      pngBase64: PNG.sync
+        .write(
+          Object.assign(new PNG(), {
+            width: 1,
+            height: 1,
+            data: Buffer.from([1, 2, 3, 255]),
+            gamma: 0,
+          }),
+        )
+        .toString("base64"),
+      draftId: draft.draftId,
+    },
+    { projectId, expectedDraftVersion: draft.draftVersion },
+  );
+  const failed = test.execute(input);
+  expect(failed).toMatchObject({
+    status: "failed",
+    error: { code: "INVALID_INPUT" },
+  });
+  expect(test.execute(input)).toEqual(failed);
+  test.reopen();
+  expect(
+    success(
+      test.execute(
+        request(
+          "riloom.project.getDraft",
+          {
+            draftId: draft.draftId,
+          },
+          { projectId },
+        ),
+      ),
+    ).result.draft,
+  ).toEqual(draft);
+  expect(test.store.openProject(projectId).read((tx) => tx.blobs())).toEqual(
+    registered,
+  );
+  const state = test.project(projectId);
+  success(
+    test.execute(
+      request(
+        "riloom.project.backup",
+        {
+          projectId,
+          expectedRevision: state.revision,
+          expectedStateHash: state.stateHash,
+          expectedStorageGeneration: state.storageGeneration,
+        },
+        { workspaceId: test.store.workspaceId },
+      ),
+    ),
+  );
+});
+
+it.each(["before refresh", "during refresh"])(
+  "preserves an unresolved import started %s and continues editing after retry",
+  async (timing) => {
+    const { test, projectId } = setup();
+    const values = new Map<string, string>();
+    let loseResponse = true;
+    let holdRefresh = false;
+    let releaseRefresh: (() => void) | undefined;
+    const editor = new Editor(
+      async (input) => {
+        const receipt = test.execute(input);
+        if (input.command === "riloom.project.get" && holdRefresh) {
+          holdRefresh = false;
+          await new Promise<void>((resolve) => {
+            releaseRefresh = resolve;
+          });
+        }
+        if (input.command === "riloom.asset.import" && loseResponse) {
+          loseResponse = false;
+          throw new RiloomError("EFFECT_UNRESOLVED", "response lost");
+        }
+        return receipt;
+      },
+      test.store.workspaceId,
+      {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => {
+          values.set(key, value);
+        },
+        removeItem: (key) => {
+          values.delete(key);
+        },
+      },
+    );
+    await editor.open(projectId);
+    const draftKey = "riloom.draft." + projectId;
+    const originalDraft = values.get(draftKey);
+    const originalProject = editor.getSnapshot().project;
+    test.apply(projectId, [
+      { type: "addParameter", after: parameter("external") },
+    ]);
+    let refresh: Promise<void> | undefined;
+    if (timing === "during refresh") {
+      holdRefresh = true;
+      refresh = editor.refreshCurrent();
+      expect(releaseRefresh).toBeDefined();
+    }
+    await editor.importPng("重试图层", png().toString("base64"));
+    expect(editor.importPending).toBe(true);
+    if (refresh) {
+      releaseRefresh!();
+      await refresh;
+    } else await editor.refreshCurrent();
+    expect(values.get(draftKey)).toBe(originalDraft);
+    expect(editor.getSnapshot().project).toEqual(originalProject);
+    await editor.retryImport();
+    expect(editor.importPending).toBe(false);
+    const drawing = editor.getSnapshot().drawItems[0]!;
+    editor.updateDrawing(drawing.id, { opacity: 0.5 });
+    await editor.save();
+    expect(editor.getSnapshot().error).toBeNull();
+    expect(editor.getSnapshot().savedGeneration).toBe(
+      editor.getSnapshot().generation,
+    );
+    await editor.refreshCurrent();
+    await editor.rebase();
+    await editor.apply();
+    expect(editor.getSnapshot().error).toBeNull();
+    test.reopen();
+    await editor.open(projectId);
+    expect(editor.getSnapshot().drawItems).toMatchObject([{ opacity: 0.5 }]);
+    expect(editor.getSnapshot().parameters).toMatchObject([{ id: "external" }]);
+    expect(editor.getSnapshot().error).toBeNull();
+  },
+);

@@ -129,6 +129,7 @@ export interface ViewTransform {
 }
 export class SceneRenderer {
   private readonly gl: WebGL2RenderingContext;
+  private readonly maxTextureSize: number;
   private readonly layers: WebGLProgram;
   private readonly output: WebGLProgram;
   private readonly corners: WebGLBuffer;
@@ -146,6 +147,7 @@ export class SceneRenderer {
     if (!gl || !gl.getExtension("EXT_color_buffer_float"))
       throw new Error("视口需要支持浮点合成的 WebGL2");
     this.gl = gl;
+    this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     this.layers = this.program(vertex, fragment);
     this.output = this.program(outputVertex, outputFragment);
     this.corners = gl.createBuffer()!;
@@ -215,15 +217,15 @@ export class SceneRenderer {
     );
     const reduction = Math.min(
       1,
-      4096 / width,
-      4096 / height,
+      Math.min(4096, this.maxTextureSize) / width,
+      Math.min(4096, this.maxTextureSize) / height,
       Math.sqrt(8_000_000 / (width * height)),
     );
     width = Math.max(1, Math.round(width * reduction));
     height = Math.max(1, Math.round(height * reduction));
     if (width !== this.width || height !== this.height) {
-      canvas.width = this.width = width;
-      canvas.height = this.height = height;
+      canvas.width = width;
+      canvas.height = height;
       this.sampling(this.composite);
       gl.texImage2D(
         gl.TEXTURE_2D,
@@ -236,6 +238,8 @@ export class SceneRenderer {
         gl.HALF_FLOAT,
         null,
       );
+      if (gl.getError() !== gl.NO_ERROR)
+        throw new Error("视口合成缓冲区分配失败，请缩小视口后重试");
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
       gl.framebufferTexture2D(
         gl.FRAMEBUFFER,
@@ -246,6 +250,8 @@ export class SceneRenderer {
       );
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
         throw new Error("视口合成缓冲区创建失败");
+      this.width = width;
+      this.height = height;
     }
     const scale =
       Math.min(width / model.canvas.width, height / model.canvas.height) * zoom;
@@ -268,46 +274,67 @@ export class SceneRenderer {
     for (const item of orderedDrawItems(model.drawItems ?? [])) {
       const source = sources.get(item.assetId);
       if (!item.visible || !item.opacity || !source) continue;
-      const key = source.asset.pixels.hash.digest;
+      if (
+        source.asset.width > this.maxTextureSize ||
+        source.asset.height > this.maxTextureSize
+      )
+        throw new Error(
+          `图层“${item.name}”的尺寸为 ${source.asset.width}×${source.asset.height}，超过当前设备的纹理边长上限 ${this.maxTextureSize}。请缩小或拆分图层。`,
+        );
+      const key = [
+        source.asset.pixels.hash.digest,
+        source.asset.width,
+        source.asset.height,
+        source.asset.bitDepth,
+      ].join(":");
       used.add(key);
       let texture = this.textures.get(key);
       if (!texture) {
-        texture = gl.createTexture()!;
-        this.textures.set(key, texture);
-        this.sampling(texture);
-        if (source.asset.bitDepth === 8)
-          gl.texImage2D(
-            gl.TEXTURE_2D,
-            0,
-            gl.RGBA8,
-            source.asset.width,
-            source.asset.height,
-            0,
-            gl.RGBA,
-            gl.UNSIGNED_BYTE,
-            source.data,
-          );
-        else {
-          const pixels = new Float32Array(source.data.byteLength / 2);
-          const view = new DataView(
-            source.data.buffer,
-            source.data.byteOffset,
-            source.data.byteLength,
-          );
-          for (let i = 0; i < pixels.length; i++)
-            pixels[i] = view.getUint16(i * 2, true) / 65535;
-          gl.texImage2D(
-            gl.TEXTURE_2D,
-            0,
-            gl.RGBA32F,
-            source.asset.width,
-            source.asset.height,
-            0,
-            gl.RGBA,
-            gl.FLOAT,
-            pixels,
-          );
+        texture = gl.createTexture() ?? undefined;
+        if (!texture)
+          throw new Error(`图层“${item.name}”的纹理创建失败，请重试。`);
+        try {
+          this.sampling(texture);
+          if (source.asset.bitDepth === 8)
+            gl.texImage2D(
+              gl.TEXTURE_2D,
+              0,
+              gl.RGBA8,
+              source.asset.width,
+              source.asset.height,
+              0,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              source.data,
+            );
+          else {
+            const pixels = new Float32Array(source.data.byteLength / 2);
+            const view = new DataView(
+              source.data.buffer,
+              source.data.byteOffset,
+              source.data.byteLength,
+            );
+            for (let i = 0; i < pixels.length; i++)
+              pixels[i] = view.getUint16(i * 2, true) / 65535;
+            gl.texImage2D(
+              gl.TEXTURE_2D,
+              0,
+              gl.RGBA32F,
+              source.asset.width,
+              source.asset.height,
+              0,
+              gl.RGBA,
+              gl.FLOAT,
+              pixels,
+            );
+          }
+          if (gl.getError() !== gl.NO_ERROR)
+            throw new Error(`图层“${item.name}”的纹理上传失败，请重试。`);
+        } catch (error) {
+          gl.deleteTexture(texture);
+          throw error;
         }
+        this.textures.set(key, texture);
       } else this.sampling(texture);
       gl.uniform2f(
         gl.getUniformLocation(this.layers, "origin"),

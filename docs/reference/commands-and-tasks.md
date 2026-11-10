@@ -63,6 +63,8 @@ riloom.asset.import 使用工程作用域和命令版本 1.0.0，输入 name、p
 
 同请求重投返回原导入结果。草稿版本变化或来源不符时返回 REVISION_CONFLICT。导入保持原 PNG 及完整解码通道，初始绘画按原尺寸居中放置。
 
+每份草稿最多包含 256 项更改，导入生成的格式升级、素材和绘画更改计入同一上限。超限返回 INVALID_INPUT，原草稿和已登记资源保持有效；应用当前草稿后可继续导入。
+
 riloom.asset.read 输入已登记的 blob 引用，可附 offset 和 length。length 最大为 4 MiB，返回当前段的 Base64 data、offset、bytes 和 nextOffset。读取下一段时使用 nextOffset，直到等于 bytes。读取需要当前工程会话授权，内容与登记不符时返回 DATA_CORRUPT。
 
 当前 PNG 输入上限为 16 MiB、800 万像素，接受 8/16 位 sRGB、灰度和索引图像及透明度。无色彩配置按 sRGB 解释。嵌入 ICC、cICP、其他色域或伽马配置返回 UNSUPPORTED_FEATURE，转换为 sRGB PNG 后可导入。原文件与解码像素分别保存，16 位通道使用小端字节序。

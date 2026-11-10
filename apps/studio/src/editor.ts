@@ -621,7 +621,12 @@ export class Editor {
     });
   }
   async refreshCurrent(): Promise<void> {
-    if (!this.state.project || this.state.applying || this.state.loading)
+    if (
+      !this.state.project ||
+      this.pendingImport ||
+      this.state.applying ||
+      this.state.loading
+    )
       return;
     const view = this.viewGeneration,
       projectId = this.state.project.model.projectId;
@@ -630,6 +635,7 @@ export class Editor {
         .result.project as ProjectState;
       if (
         view !== this.viewGeneration ||
+        this.pendingImport ||
         this.state.applying ||
         this.state.loading ||
         project.revision < this.state.project!.revision
