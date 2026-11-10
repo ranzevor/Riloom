@@ -1,0 +1,47 @@
+name: Engineering
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engineering-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Engineering (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.22.1"
+      - name: Install pnpm
+        run: npm install --global pnpm@12.10.1 --ignore-scripts
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+      - name: Check types
+        run: pnpm typecheck
+      - name: Check lint
+        run: pnpm lint
+      - name: Check formatting
+        run: pnpm format
+      - name: Test
+        run: pnpm test

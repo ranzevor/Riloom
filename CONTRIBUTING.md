@@ -1,6 +1,6 @@
 # 贡献指南
 
-欢迎改进 Riloom 的产品设计、技术方案、文档和工具。
+欢迎改进 Riloom 的制作能力、产品设计、技术方案、文档和工具。
 
 ## 问题与讨论
 
@@ -19,11 +19,15 @@
 
 ## 本地检查
 
-使用 Node.js 24 LTS，在仓库根目录执行。
+使用 Node.js 24.22.1 和 pnpm 12.10.1，在仓库根目录执行。
 
 ```sh
-node scripts/check-docs.mjs
+pnpm install --frozen-lockfile
+pnpm check
+pnpm format
 ```
+
+`pnpm check` 依次构建、检查类型和模块依赖、执行测试并检查文档。单项入口为 `pnpm build`、`pnpm typecheck`、`pnpm lint`、`pnpm test` 和 `pnpm check:docs`。仅修改文档时执行 `pnpm check:docs`，源码变更选择受影响的检查。
 
 检查覆盖 Markdown 本地链接与章节锚点、JSON 语法、UTF-8、LF 和文件末尾换行。按错误输出修正具体文件后重新执行。正文含义、设计可实施性和材料许可同时按实际变更审阅。
 

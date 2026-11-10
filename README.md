@@ -4,7 +4,7 @@
 
 **本地优先、可编程的二维角色制作工作台。**
 
-[![Stage: Design](https://img.shields.io/badge/Stage-Design-7C3AED)](#status)
+[![Stage: M1](https://img.shields.io/badge/Stage-M1-7C3AED)](#status)
 [![Code: Apache-2.0](https://img.shields.io/badge/Code-Apache--2.0-2563EB)](LICENSE)
 [![Docs: CC BY 4.0](https://img.shields.io/badge/Docs-CC%20BY%204.0-2563EB)](LICENSE)
 
@@ -19,7 +19,7 @@ Riloom 面向角色美术、模型制作者和自动化工具开发者，将分�
 <a id="status"></a>
 ## 当前阶段
 
-当前处于 **M0 项目设计阶段**。仓库提供产品需求、架构、数据与接口契约、工作台交互、测试方案和实施路线，以及文档协作工具。
+当前处于 **M1 工程底座开发阶段**。已实现工程创建、参数草稿编辑与保存、候选准备、原子应用、共享撤销重做及重启恢复。Studio、MCP、CLI 和 SDK 共用本地工作区服务。
 
 首版按“工程底座 → 自由制作 → 表现与返修 → 原生适配与独立交付”推进。各阶段的范围和完成条件见[实施路线图](docs/project/roadmap.md)。
 
@@ -36,6 +36,26 @@ Riloom 面向角色美术、模型制作者和自动化工具开发者，将分�
 
 <a id="quick-start"></a>
 ## 快速开始
+
+### 启动工作台
+
+安装 **Node.js 24.22.1** 和 **pnpm 12.10.1**，在仓库根目录执行。
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm start -- studio --workspace ./.local/workspace
+```
+
+在浏览器中打开命令输出的启动链接，创建工程并添加参数。参数修改会自动保存为草稿，选择“应用草稿”后更新工程；关闭并重新打开工作台可继续编辑。工作区服务由首次调用启动，多个入口共用同一实例。
+
+```sh
+pnpm start -- project list --workspace ./.local/workspace --json
+pnpm start -- mcp --workspace ./.local/workspace
+pnpm start -- stop --workspace ./.local/workspace
+```
+
+MCP 客户端以第二条命令启动 stdio 桥。关闭桥接进程后，工作区服务继续运行；第三条命令停止指定工作区。完整命令封套及草稿流程见[命令与任务](docs/reference/commands-and-tasks.md#project-editing-entry)。
 
 ### 阅读设计
 

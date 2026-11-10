@@ -26,6 +26,37 @@ CommandSpec.version 与请求 commandVersion 均使用完整 SemVer 字符串，
 
 MCP 通过 stdio 公开同名工具、类型化结果、分页资源和进度。发行兼容清单固定支持的协议版本，握手、结果封装和传输取消按所选协议映射。每个持久任务都有应用层 jobId 和查询接口，业务取消通过任务命令提交。工具 hint 用于展示，实际副作用在应用服务校验。
 
+<a id="project-editing-entry"></a>
+
+### 工程编辑入口
+
+当前参数编辑闭环采用命令版本 1.0.0。MCP 工具目录由同一注册表提供输入 Schema，CLI 的 `call --input` 读取完整 JSON 请求，Web 将相同请求发往 `POST /api/v1/commands`。
+
+| 命令 | 输入和结果 |
+| --- | --- |
+| `riloom.workspace.get` | 工作区作用域，返回工作区、服务世代和可用命令 |
+| `riloom.project.list` | 工作区作用域，接受 limit 和 cursor，返回工程列表 |
+| `riloom.project.create` | name、directory、canvas，返回 projectId、初始修订及状态身份 |
+| `riloom.project.get` | 工程作用域，result.project 返回模型、修订、事件游标与历史位置 |
+| `riloom.project.saveDraft` | 完整草稿、固定基线、编辑代次及 expectedDraftVersion，result.draft 返回已保存草稿 |
+| `riloom.project.getDraft` | draftId，result.draft 和 result.base 返回草稿与对应基线模型 |
+| `riloom.project.listDrafts` | limit 和 cursor，返回保存的草稿列表 |
+| `riloom.project.prepareDraft` | draftId 和 expectedDraftVersion，result.candidate 返回固定版本候选 |
+| `riloom.project.apply` | candidateId、draftId、草稿与工程前提，原子提交模型、草稿终结和回执 |
+| `riloom.project.discardDraft` | draftId 和 expectedDraftVersion，终结草稿 |
+| `riloom.project.undo`、`riloom.project.redo` | undoGroupId、工程前提和 expectedHistoryVersion，导航共享历史 |
+| `riloom.project.getOperation`、`riloom.workspace.getOperation` | 原 requestId，在对应作用域查询原操作 |
+
+每个请求包含 requestId、command、commandVersion、arguments，并按作用域提供 workspaceId 或 projectId。工具调用参数省略 command，由 MCP 工具名确定。查询返回当前读视图，写入结果按原请求保存在对应数据库中。
+
+Parameter 字段为 id、name、unit、min、default、max、value。id 稳定且在工程内唯一，名称允许重复；默认值与当前值位于闭区间 [min,max]，数值必须有限。ChangeSet 支持 addParameter、updateParameter、removeParameter。更新和删除提供完整 before，新增提供完整 after，逆操作保留参数顺序。空草稿可保存，有效模型变化由准备和应用步骤检查。
+
+创建目录为工作区内单级 `.riloom` 目录名。已有非空目录返回 RESOURCE_BUSY。创建意图持久化后，完整初始化结果由重启接续登记；初始化完成前中断的请求保存失败回执，可用新请求重新创建。每次模型应用形成一个完整撤销组。
+
+Studio 自动保存最多保留一个在途请求，后续输入在前次保存确认后提交。应用结果未知时保留原请求进行核对，确认前暂停该草稿的编辑。其他入口修改模型时保留当前草稿；选择“保留编辑并重新准备”会将本次修改的字段应用到当前模型，再保存为新草稿。
+
+浏览器使用启动链接中的一次性短期凭据建立会话。服务校验回环 Host、同源 Origin、会话 Cookie 和写请求的 CSRF 值。SSE 以 projectId 和 after 订阅，重连优先使用 Last-Event-ID；事件包含工程身份、序号、修订和操作身份。IPC 校验操作系统提供的对端身份，再完成绑定工作区与服务世代的授权握手。
+
 ## 2. 写入封套与回执
 
 ### 对象作用域与并发前提
