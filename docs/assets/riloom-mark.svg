@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="riloom-mark-title riloom-mark-description">
+  <title id="riloom-mark-title">Riloom 形织标志</title>
+  <desc id="riloom-mark-description">石墨色圆角底板上的蓝紫色 R 形交织线条。</desc>
+  <rect x="1" y="1" width="62" height="62" rx="18" fill="#1e222e"/>
+  <path d="M20 46V18H32C40 18 44 22 44 29C44 36 40 40 32 40H20" fill="none" stroke="#b5a8ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M31 36L46 47" fill="none" stroke="#1e222e" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M31 36L46 47" fill="none" stroke="#8aa9ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

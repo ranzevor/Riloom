@@ -1,0 +1,21 @@
+# Riloom 许可
+
+本文件确定 Riloom 自有材料的许可范围，自 2026 年 11 月 10 日起适用。各许可证全文随仓库提供。
+
+| 材料 | 适用许可 |
+| --- | --- |
+| 自有源码、客户端 SDK、插件接口、构建脚本及工程配置 | [Apache License 2.0](LICENSES/Apache-2.0.txt) |
+| 自有文档正文与设计数据，包括 README、贡献与安全指南，以及 docs 中的 Markdown 和 JSON | [Creative Commons Attribution 4.0 International](LICENSES/CC-BY-4.0.txt) |
+| 自有合成测试图形及最小示例 | [CC0 1.0 Universal](LICENSES/CC0-1.0.txt) |
+
+上述范围适用于对应类型的当前材料及后续纳入本仓库的自有材料。各文件已有的作者信息、版权和许可通知随文件保留。第三方材料及第三方法律文本按其原有许可和通知使用。
+
+## 项目标志
+
+Riloom 标志图形允许用于介绍 Riloom 项目或链接 Riloom 仓库，复制和展示时保留原图形。修改标志或用于其他品牌用途，由项目权利主体另行授权。
+
+源码和文档的许可范围分别按上表执行，品牌使用请求通过仓库问题入口联系维护者。
+
+## 贡献
+
+贡献采用 [Developer Certificate of Origin 1.1](DCO)，按[贡献指南](CONTRIBUTING.md)提交。贡献材料适用其所属类型的许可，另有有效第三方许可的材料保留对应许可与通知。

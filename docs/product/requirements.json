@@ -1,0 +1,479 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-01",
+      "title": "工程创建与分层导入",
+      "milestone": "M2",
+      "designDocuments": [
+        "docs/reference/project-format.md",
+        "docs/reference/commands-and-tasks.md",
+        "docs/reference/integrations-and-delivery.md"
+      ],
+      "plannedModules": [
+        "core",
+        "application",
+        "storage",
+        "apps/service",
+        "adapters/psd"
+      ],
+      "acceptanceIds": [
+        "T01",
+        "T01.1"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md",
+      "children": [
+        {
+          "id": "REQ-01.1",
+          "parentId": "REQ-01",
+          "title": "工程创建与登记",
+          "milestone": "M1",
+          "designDocuments": [
+            "docs/reference/project-format.md",
+            "docs/reference/commands-and-tasks.md"
+          ],
+          "plannedModules": [
+            "core",
+            "application",
+            "storage",
+            "apps/service"
+          ],
+          "acceptanceIds": [
+            "T01.1"
+          ],
+          "acceptanceDocument": "docs/testing/strategy.md"
+        },
+        {
+          "id": "REQ-01.2",
+          "parentId": "REQ-01",
+          "title": "分层素材导入与重开",
+          "milestone": "M2",
+          "designDocuments": [
+            "docs/reference/project-format.md",
+            "docs/reference/integrations-and-delivery.md"
+          ],
+          "plannedModules": [
+            "core",
+            "application",
+            "storage",
+            "adapters/psd"
+          ],
+          "acceptanceIds": [
+            "T01"
+          ],
+          "acceptanceDocument": "docs/testing/strategy.md"
+        }
+      ]
+    },
+    {
+      "id": "REQ-02",
+      "title": "保护选区、绘画与衣口分层",
+      "milestone": "M2",
+      "designDocuments": [
+        "docs/reference/authoring-and-evaluation.md",
+        "docs/reference/project-format.md",
+        "docs/reference/commands-and-tasks.md",
+        "docs/design/studio.md"
+      ],
+      "plannedModules": [
+        "authoring",
+        "adapters/image-provider",
+        "application",
+        "storage"
+      ],
+      "acceptanceIds": [
+        "T02"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-03",
+      "title": "网格、UV 与局部关键形",
+      "milestone": "M2",
+      "designDocuments": [
+        "docs/reference/authoring-and-evaluation.md",
+        "docs/reference/project-format.md"
+      ],
+      "plannedModules": [
+        "core",
+        "authoring",
+        "evaluation"
+      ],
+      "acceptanceIds": [
+        "T03"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-04",
+      "title": "父控制与多参数关键形",
+      "milestone": "M2",
+      "designDocuments": [
+        "docs/reference/authoring-and-evaluation.md",
+        "docs/reference/project-format.md"
+      ],
+      "plannedModules": [
+        "core",
+        "evaluation"
+      ],
+      "acceptanceIds": [
+        "T04"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-05",
+      "title": "通用状态组、表情、衣装与嘴型",
+      "milestone": "M3",
+      "designDocuments": [
+        "docs/reference/authoring-and-evaluation.md"
+      ],
+      "plannedModules": [
+        "core",
+        "evaluation"
+      ],
+      "acceptanceIds": [
+        "T05"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-06",
+      "title": "动作曲线、追踪混合与随机重放",
+      "milestone": "M3",
+      "designDocuments": [
+        "docs/reference/authoring-and-evaluation.md"
+      ],
+      "plannedModules": [
+        "evaluation"
+      ],
+      "acceptanceIds": [
+        "T06"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-07",
+      "title": "物理时步、暖机与轨迹",
+      "milestone": "M3",
+      "designDocuments": [
+        "docs/reference/authoring-and-evaluation.md",
+        "docs/reference/project-format.md"
+      ],
+      "plannedModules": [
+        "evaluation",
+        "authoring"
+      ],
+      "acceptanceIds": [
+        "T07"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-08",
+      "title": "共享求值、渲染与资源生命周期",
+      "milestone": "M4",
+      "designDocuments": [
+        "docs/reference/authoring-and-evaluation.md",
+        "docs/reference/project-format.md",
+        "docs/design/studio.md"
+      ],
+      "plannedModules": [
+        "evaluation",
+        "renderer"
+      ],
+      "acceptanceIds": [
+        "T08"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-09",
+      "title": "原子编辑、冲突与请求重放",
+      "milestone": "M1",
+      "designDocuments": [
+        "docs/reference/commands-and-tasks.md",
+        "docs/reference/project-format.md"
+      ],
+      "plannedModules": [
+        "application",
+        "storage"
+      ],
+      "acceptanceIds": [
+        "T09"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-10",
+      "title": "后台任务、取消与重启恢复",
+      "milestone": "M3",
+      "designDocuments": [
+        "docs/reference/commands-and-tasks.md",
+        "docs/reference/project-format.md"
+      ],
+      "plannedModules": [
+        "jobs",
+        "storage"
+      ],
+      "acceptanceIds": [
+        "T10"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-11",
+      "title": "缺陷、返修与分项复验",
+      "milestone": "M3",
+      "designDocuments": [
+        "docs/reference/authoring-and-evaluation.md"
+      ],
+      "plannedModules": [
+        "authoring",
+        "application"
+      ],
+      "acceptanceIds": [
+        "T11"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-12",
+      "title": "Web、MCP、CLI、SDK 契约等价",
+      "milestone": "M4",
+      "designDocuments": [
+        "docs/reference/commands-and-tasks.md"
+      ],
+      "plannedModules": [
+        "contracts",
+        "application",
+        "apps/mcp",
+        "apps/cli",
+        "sdk"
+      ],
+      "acceptanceIds": [
+        "T12"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-13",
+      "title": "统一工作台与可访问编辑",
+      "milestone": "M4",
+      "designDocuments": [
+        "docs/design/studio.md",
+        "docs/reference/commands-and-tasks.md"
+      ],
+      "plannedModules": [
+        "apps/studio"
+      ],
+      "acceptanceIds": [
+        "T13"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-14",
+      "title": "插件、配方与能力协商",
+      "milestone": "M2",
+      "designDocuments": [
+        "docs/reference/commands-and-tasks.md",
+        "docs/architecture/overview.md"
+      ],
+      "plannedModules": [
+        "plugin-api",
+        "jobs"
+      ],
+      "acceptanceIds": [
+        "T14"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-15",
+      "title": "真实原生转换与保真检查",
+      "milestone": "M4",
+      "designDocuments": [
+        "docs/reference/integrations-and-delivery.md"
+      ],
+      "plannedModules": [
+        "adapters/cubism"
+      ],
+      "acceptanceIds": [
+        "T15"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-16",
+      "title": "VTS 身份、映射与有界联调",
+      "milestone": "M4",
+      "designDocuments": [
+        "docs/reference/integrations-and-delivery.md"
+      ],
+      "plannedModules": [
+        "adapters/vtube-studio"
+      ],
+      "acceptanceIds": [
+        "T16"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-17",
+      "title": "可编辑工程及独立运行交付",
+      "milestone": "M4",
+      "designDocuments": [
+        "docs/reference/integrations-and-delivery.md"
+      ],
+      "plannedModules": [
+        "application",
+        "renderer",
+        "adapters/cubism"
+      ],
+      "acceptanceIds": [
+        "T17"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-18",
+      "title": "权限、输入边界与隐私",
+      "milestone": "M5",
+      "designDocuments": [
+        "docs/security/design.md",
+        "docs/reference/commands-and-tasks.md",
+        "docs/architecture/overview.md"
+      ],
+      "plannedModules": [
+        "application",
+        "storage",
+        "apps/service"
+      ],
+      "acceptanceIds": [
+        "T18"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-19",
+      "title": "性能、资源预算与取消回收",
+      "milestone": "M5",
+      "designDocuments": [
+        "docs/testing/strategy.md"
+      ],
+      "plannedModules": [
+        "renderer",
+        "jobs",
+        "apps/service"
+      ],
+      "acceptanceIds": [
+        "T19"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    },
+    {
+      "id": "REQ-20",
+      "title": "开源治理、可复现构建与发行",
+      "milestone": "M5",
+      "designDocuments": [
+        "docs/project/governance.md",
+        "docs/project/licensing.md"
+      ],
+      "plannedModules": [
+        "repository",
+        "release"
+      ],
+      "acceptanceIds": [
+        "T20"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md",
+      "children": [
+        {
+          "id": "REQ-20.1",
+          "parentId": "REQ-20",
+          "title": "材料许可与分发范围",
+          "milestone": "M5",
+          "designDocuments": [
+            "docs/project/licensing.md"
+          ],
+          "plannedModules": [
+            "repository"
+          ],
+          "acceptanceIds": [
+            "T20.1"
+          ],
+          "acceptanceDocument": "docs/testing/strategy.md"
+        },
+        {
+          "id": "REQ-20.2",
+          "parentId": "REQ-20",
+          "title": "可复现构建",
+          "milestone": "M5",
+          "designDocuments": [
+            "docs/architecture/overview.md",
+            "docs/project/governance.md"
+          ],
+          "plannedModules": [
+            "repository",
+            "release"
+          ],
+          "acceptanceIds": [
+            "T20.2"
+          ],
+          "acceptanceDocument": "docs/testing/strategy.md"
+        },
+        {
+          "id": "REQ-20.3",
+          "parentId": "REQ-20",
+          "title": "安装与兼容",
+          "milestone": "M5",
+          "designDocuments": [
+            "docs/product/overview.md",
+            "docs/project/governance.md"
+          ],
+          "plannedModules": [
+            "release"
+          ],
+          "acceptanceIds": [
+            "T20.3"
+          ],
+          "acceptanceDocument": "docs/testing/strategy.md"
+        },
+        {
+          "id": "REQ-20.4",
+          "parentId": "REQ-20",
+          "title": "发行与渠道一致性",
+          "milestone": "M5",
+          "designDocuments": [
+            "docs/project/governance.md"
+          ],
+          "plannedModules": [
+            "release"
+          ],
+          "acceptanceIds": [
+            "T20.4"
+          ],
+          "acceptanceDocument": "docs/testing/strategy.md"
+        }
+      ]
+    },
+    {
+      "id": "REQ-22",
+      "title": "版本化格式、备份与恢复",
+      "milestone": "M1",
+      "designDocuments": [
+        "docs/reference/project-format.md",
+        "docs/reference/commands-and-tasks.md",
+        "docs/architecture/overview.md"
+      ],
+      "plannedModules": [
+        "contracts",
+        "storage"
+      ],
+      "acceptanceIds": [
+        "T22"
+      ],
+      "acceptanceDocument": "docs/testing/strategy.md"
+    }
+  ]
+}
