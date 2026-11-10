@@ -1,4 +1,6 @@
 import type {
+  BackupInfo,
+  RestorePlan,
   Candidate,
   Change,
   CommandRequest,
@@ -24,6 +26,7 @@ export interface ProjectTransaction {
   receiptById(operationId: string): Receipt | null;
 
   modelAt(revision: number): ProjectModel;
+  requiresStorageGeneration(): boolean;
   draft(id: string): Draft | null;
   drafts(): Draft[];
   draftsVersion(): number;
@@ -58,11 +61,19 @@ export interface CreateProjectInput {
   model: ProjectModel;
   directory: string;
 }
+export interface WorkspaceOperation {
+  request: CommandRequest;
+  inputHash: StateHash;
+  operationId: string;
+}
 export interface WorkspacePersistence {
   readonly workspaceId: string;
   listProjects(): { version: number; items: RegisteredProject[] };
   receipt(requestId: string): Receipt | null;
   createProject(input: CreateProjectInput): Receipt;
+  manageBackup(input: WorkspaceOperation): Receipt;
+  listBackups(projectId?: string): { version: number; items: BackupInfo[] };
+  prepareRestore(backupId: string): RestorePlan;
   openProject(projectId: string): ProjectPersistence;
   projectGeneration(projectId: string): string;
   close(): void;

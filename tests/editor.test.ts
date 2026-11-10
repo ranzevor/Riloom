@@ -240,4 +240,84 @@ describe("Studio editing", () => {
     expect(f.project(projectId).model.parameters).toHaveLength(2);
     expect(editor.getSnapshot().error).toBeNull();
   });
+
+  it("restores a backup and continues editing in its new storage generation", async () => {
+    const { editor, f } = setup();
+    await editor.create("备份工程", "backup-editor.riloom");
+    editor.addParameter();
+    await editor.apply();
+    await editor.backup();
+    const saved = editor.getSnapshot().backups[0]!,
+      old = editor.getSnapshot().project!;
+    editor.updateParameter(editor.getSnapshot().selected!, { value: 0.5 });
+    await editor.apply();
+    await editor.restoreBackup(saved.backupId, "restored-editor.riloom");
+    expect(editor.getSnapshot().error).toBeNull();
+    expect(editor.getSnapshot().parameters[0]!.value).toBe(0);
+    expect(editor.getSnapshot().project!.storageGeneration).not.toBe(
+      old.storageGeneration,
+    );
+    editor.updateParameter(editor.getSnapshot().selected!, { value: 0.25 });
+    await editor.apply();
+    expect(f.project(saved.projectId).model.parameters[0]!.value).toBe(0.25);
+  });
+  it("reuses the original restore request after its response is lost", async () => {
+    let interrupted = false;
+    const { editor, f } = setup((base) => async (input) => {
+      const result = await base(input);
+      if (input.command === "riloom.project.restore" && !interrupted) {
+        interrupted = true;
+        throw new RiloomError("EFFECT_UNRESOLVED", "连接中断");
+      }
+      return result;
+    });
+    await editor.create("恢复重试", "restore-retry.riloom");
+    editor.addParameter();
+    await editor.apply();
+    await editor.backup();
+    const backup = editor.getSnapshot().backups[0]!;
+    await editor.restoreBackup(backup.backupId, "restored-retry.riloom");
+    expect(editor.getSnapshot().recovering).toBe(true);
+    await editor.restoreBackup(backup.backupId, "restored-retry.riloom");
+    expect(editor.getSnapshot().recovering).toBe(false);
+    expect(editor.getSnapshot().error).toBeNull();
+    expect(f.store.listProjects().items).toHaveLength(1);
+    expect(f.project(backup.projectId).revision).toBe(1);
+  });
+  it("preserves unsaved local edits when another entry restores the project", async () => {
+    const { editor, f } = setup();
+    await editor.create("交错恢复", "external-restore.riloom");
+    editor.addParameter();
+    await editor.apply();
+    await editor.backup();
+    const backup = editor.getSnapshot().backups[0]!,
+      state = editor.getSnapshot().project!;
+    editor.updateParameter(editor.getSnapshot().selected!, {
+      name: "保留输入",
+    });
+    const response = f.execute({
+      requestId: "external-restore",
+      command: "riloom.project.restore",
+      commandVersion: "1.0.0",
+      workspaceId: f.store.workspaceId,
+      arguments: {
+        backupId: backup.backupId,
+        directory: "external-restored.riloom",
+        expectedProject: {
+          storageGeneration: state.storageGeneration,
+          revision: state.revision,
+          stateHash: state.stateHash,
+        },
+      },
+    });
+    expect(response.status).toBe("succeeded");
+    await editor.refreshCurrent();
+    expect(editor.getSnapshot().parameters[0]!.name).toBe("保留输入");
+    await editor.rebase();
+    await editor.apply();
+    expect(editor.getSnapshot().error).toBeNull();
+    expect(f.project(backup.projectId).model.parameters[0]!.name).toBe(
+      "保留输入",
+    );
+  });
 });

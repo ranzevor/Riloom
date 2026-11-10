@@ -158,7 +158,19 @@ export async function startService(
     if (!grant.allowedCommands.includes(request.command))
       throw new RiloomError("PERMISSION_DENIED", "会话未授权此操作");
     if (request.projectId) checkProject(grant, request.projectId);
-    return application.execute(request);
+    if (request.command === "riloom.project.backup")
+      checkProject(grant, request.arguments.projectId as string);
+    const receipt = application.execute(request);
+    if (
+      request.command === "riloom.project.open" &&
+      receipt.status === "succeeded"
+    ) {
+      const project = receipt.result
+        .project as import("@riloom/contracts").ProjectState;
+      grant.projectGenerations[project.model.projectId] =
+        project.storageGeneration;
+    }
+    return receipt;
   };
   const browserLink = () => {
     pruneAuth();

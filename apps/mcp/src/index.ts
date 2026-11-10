@@ -33,7 +33,8 @@ export async function runMcp(client: RiloomClient): Promise<Server> {
         },
         annotations: {
           readOnlyHint: command.kind === "query",
-          destructiveHint: command.kind === "apply",
+          destructiveHint:
+            command.kind === "apply" || name === "riloom.project.restore",
           idempotentHint: true,
           openWorldHint: false,
         },

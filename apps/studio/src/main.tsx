@@ -6,16 +6,19 @@ import {
   type Receipt,
 } from "@riloom/contracts";
 import { Editor } from "./editor.js";
+import { BackupPanel } from "./backup-panel.js";
 import "./style.css";
 
 function Workbench({ editor }: { editor: Editor }) {
   const state = useSyncExternalStore(editor.subscribe, editor.getSnapshot);
+  const [showBackups, setShowBackups] = useState(false);
   const [creating, setCreating] = useState(false),
     [name, setName] = useState("新工程"),
     [directory, setDirectory] = useState("新工程.riloom");
   const parameter = state.parameters.find((item) => item.id === state.selected);
   const changes = editor.changes(),
-    busy = state.loading || state.applying || state.rechecking;
+    busy =
+      state.loading || state.applying || state.rechecking || state.recovering;
   useEffect(() => {
     void editor.initialize().catch((error) => editor.showError(error));
     const focus = () => {
@@ -23,7 +26,11 @@ function Workbench({ editor }: { editor: Editor }) {
     };
     const unload = (event: BeforeUnloadEvent) => {
       const current = editor.getSnapshot();
-      if (current.generation > current.savedGeneration || current.applying) {
+      if (
+        current.generation > current.savedGeneration ||
+        current.applying ||
+        current.recovering
+      ) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -56,7 +63,11 @@ function Workbench({ editor }: { editor: Editor }) {
       void editor.refreshCurrent();
     };
     return () => source.close();
-  }, [editor, state.project?.model.projectId]);
+  }, [
+    editor,
+    state.project?.model.projectId,
+    state.project?.storageGeneration,
+  ]);
   const status = state.applying
     ? "正在应用"
     : state.saving
@@ -82,6 +93,17 @@ function Workbench({ editor }: { editor: Editor }) {
           {state.project ? status : "开始新的制作"}
         </span>
         <div className="header-actions">
+          <button
+            onClick={() => {
+              setShowBackups(true);
+              void editor
+                .refreshBackups()
+                .catch((error) => editor.showError(error));
+            }}
+            disabled={busy}
+          >
+            备份与恢复
+          </button>
           <button
             onClick={() => void editor.navigate("undo")}
             disabled={busy || !!changes.length || !state.project?.undoGroupId}
@@ -115,6 +137,9 @@ function Workbench({ editor }: { editor: Editor }) {
           </button>
         </div>
       </header>
+      {showBackups && (
+        <BackupPanel editor={editor} onClose={() => setShowBackups(false)} />
+      )}
       <aside className="projects">
         <div className="panel-heading">
           <h2>工程</h2>
@@ -206,7 +231,7 @@ function Workbench({ editor }: { editor: Editor }) {
         </nav>
       </aside>
       <main>
-        {state.error && (
+        {state.error && !showBackups && (
           <div className="error" role="alert">
             <span>{state.error}</span>
             {state.project && (

@@ -411,12 +411,150 @@ describe("workspace service transports", () => {
           )
         ).result.project,
       ).toMatchObject({ revision: 0, model: { name: "命令行工程" } });
+      const saved = await run(
+        "backup",
+        "create",
+        "--project",
+        created.result.projectId as string,
+      );
+      const info = saved.result
+        .backup as import("../packages/contracts/dist/index.js").BackupInfo;
+      const restored = await run(
+        "backup",
+        "restore",
+        "--backup",
+        info.backupId,
+        "--directory",
+        "restored-cli.riloom",
+      );
+      expect(restored.result.project).toMatchObject({
+        revision: 0,
+        model: { name: "命令行工程" },
+      });
+      const listed = await run("backup", "list");
+      expect(listed.result.items).toHaveLength(1);
     } finally {
       const client = await RiloomClient.connect(workspace);
       await client.shutdown();
       client.close();
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
+  });
+
+  it("shares backup restoration across MCP and HTTP and requires reopening old sessions", async () => {
+    const { client, workspace } = await setup(),
+      session = await browser(client);
+    const created = success(
+      await client.execute(
+        request(
+          "riloom.project.create",
+          {
+            name: "恢复授权",
+            directory: "authorization.riloom",
+            canvas: { width: 100, height: 100 },
+          },
+          { workspaceId: client.workspaceId },
+        ),
+      ),
+    );
+    const projectId = created.result.projectId as string;
+    const state = success(
+      await client.execute(request("riloom.project.get", {}, { projectId })),
+    ).result
+      .project as import("../packages/contracts/dist/index.js").ProjectState;
+    await fetch(session.origin + "/api/v1/projects/" + projectId, {
+      headers: { Cookie: session.cookie },
+    });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [
+        fileURLToPath(new URL("../apps/cli/dist/index.js", import.meta.url)),
+        "mcp",
+        "--workspace",
+        workspace,
+      ],
+      stderr: "pipe",
+    });
+    transports.push(transport);
+    const mcp = new Client({
+      name: "riloom-backup-integration",
+      version: "1.0.0",
+    });
+    await mcp.connect(transport);
+    expect(
+      (await mcp.listTools()).tools.find(
+        (tool) => tool.name === "riloom.project.restore",
+      )?.annotations?.destructiveHint,
+    ).toBe(true);
+    const saved = await mcp.callTool({
+      name: "riloom.project.backup",
+      arguments: {
+        requestId: "mcp-backup",
+        commandVersion: "1.0.0",
+        workspaceId: client.workspaceId,
+        arguments: {
+          projectId,
+          expectedRevision: state.revision,
+          expectedStateHash: state.stateHash,
+          expectedStorageGeneration: state.storageGeneration,
+        },
+      },
+    });
+    expect(saved.isError).toBe(false);
+    const backup = (saved.structuredContent as unknown as Receipt).result
+      .backup as import("../packages/contracts/dist/index.js").BackupInfo;
+    const response = await fetch(session.origin + "/api/v1/commands", {
+      method: "POST",
+      headers: {
+        Origin: session.origin,
+        Cookie: session.cookie,
+        "Content-Type": "application/json",
+        "X-Riloom-CSRF": session.csrf,
+      },
+      body: JSON.stringify(
+        request(
+          "riloom.project.restore",
+          {
+            backupId: backup.backupId,
+            directory: "restored-auth.riloom",
+            expectedProject: {
+              storageGeneration: state.storageGeneration,
+              revision: state.revision,
+              stateHash: state.stateHash,
+            },
+          },
+          { workspaceId: client.workspaceId },
+        ),
+      ),
+    });
+    expect(
+      success((await response.json()) as Receipt).result.project,
+    ).toMatchObject({ revision: 0 });
+    await expect(
+      client.execute(request("riloom.project.get", {}, { projectId })),
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(
+      (
+        await fetch(session.origin + "/api/v1/projects/" + projectId, {
+          headers: { Cookie: session.cookie },
+        })
+      ).status,
+    ).toBe(403);
+    const reopened = success(
+      await client.execute(
+        request(
+          "riloom.project.open",
+          { projectId },
+          { workspaceId: client.workspaceId },
+        ),
+      ),
+    );
+    expect(reopened.result.project).toMatchObject({ revision: 0 });
+    expect(
+      (await client.execute(request("riloom.project.get", {}, { projectId })))
+        .status,
+    ).toBe("succeeded");
+    await mcp.close();
   });
 });
 

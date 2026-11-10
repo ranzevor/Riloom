@@ -354,3 +354,59 @@ label input {
     flex-wrap: wrap;
   }
 }
+
+.backup-panel {
+  width: min(620px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  padding: 24px;
+  color: #edf0f8;
+  background: #1e222e;
+  border: 1px solid #34394a;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px #0008;
+}
+.backup-panel::backdrop {
+  background: #10121bcc;
+}
+.backup-panel .panel-heading {
+  padding: 0 0 16px;
+}
+.backup-panel form {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+.backup-panel label {
+  display: grid;
+  gap: 8px;
+}
+.backup-panel input {
+  width: 100%;
+}
+.backup-panel details {
+  margin-top: 24px;
+}
+.backup-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 18px;
+}
+.backup-list button {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  padding: 14px;
+}
+.backup-list span {
+  color: #a3adc2;
+  font-size: 12px;
+}
+.backup-list .selected {
+  border-color: #b5a8ff;
+  background: #b5a8ff12;
+}
+.backup-message {
+  color: #b5a8ff;
+}
