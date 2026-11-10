@@ -329,7 +329,7 @@ export async function startService(
     for await (const value of request) {
       const chunk = Buffer.from(value as Uint8Array);
       length += chunk.length;
-      if (length > 1048576)
+      if (length > 24 * 1024 * 1024)
         throw new RiloomError("INVALID_INPUT", "请求内容过大");
       chunks.push(chunk);
     }

@@ -4,11 +4,13 @@ import ts from "typescript-eslint";
 const boundaries = {
   "packages/contracts": [],
   "packages/core": ["contracts"],
-  "packages/application": ["contracts", "core"],
+  "packages/image": ["contracts"],
+  "packages/renderer": ["contracts", "core"],
+  "packages/application": ["contracts", "core", "image"],
   "packages/platform": ["contracts"],
   "packages/storage": ["application", "contracts", "core", "platform"],
   "packages/sdk": ["contracts", "platform"],
-  "apps/studio": ["contracts", "core"],
+  "apps/studio": ["contracts", "core", "renderer"],
   "apps/mcp": ["contracts", "sdk"],
   "apps/cli": ["contracts", "mcp", "sdk", "service"],
 };

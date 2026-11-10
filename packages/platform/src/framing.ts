@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { Wire } from "./pipes.js";
 
-export const maxFrameBytes = 8 * 1024 * 1024;
+export const maxFrameBytes = 24 * 1024 * 1024;
 export class FramedConnection extends EventEmitter {
   private pending = Buffer.alloc(0);
   constructor(readonly wire: Wire) {

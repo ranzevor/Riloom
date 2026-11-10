@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
-import { readFileSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync, lstatSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { RiloomClient } from "@riloom/sdk";
@@ -111,7 +111,47 @@ async function main(): Promise<void> {
       request = JSON.parse(
         readFileSync(values.input, "utf8"),
       ) as CommandRequest;
-    else if (positionals[0] === "backup") {
+    else if (positionals[0] === "asset" && positionals[1] === "import") {
+      if (!values.source || !values.project)
+        throw new RiloomError(
+          "INVALID_INPUT",
+          "请用 --source 和 --project 选择 PNG 文件及工程",
+        );
+      const info = lstatSync(values.source);
+      if (
+        !info.isFile() ||
+        info.isSymbolicLink() ||
+        info.size > 16 * 1024 * 1024
+      )
+        throw new RiloomError(
+          "INVALID_INPUT",
+          "请选择 16 MiB 以内的 PNG 常规文件",
+        );
+      const opened = await client.execute({
+        requestId: randomUUID(),
+        command: "riloom.project.open",
+        commandVersion: "1.0.0",
+        workspaceId: client.workspaceId,
+        arguments: { projectId: values.project },
+      });
+      if (opened.status === "failed")
+        throw new RiloomError(opened.error!.code, opened.error!.message);
+      const project = opened.result.project as ProjectState;
+      request = {
+        requestId: randomUUID(),
+        command: "riloom.asset.import",
+        commandVersion: "1.0.0",
+        projectId: values.project,
+        expectedDraftVersion: 0,
+        expectedStorageGeneration: project.storageGeneration,
+        arguments: {
+          name:
+            values.name ??
+            path.basename(values.source, path.extname(values.source)),
+          pngBase64: readFileSync(values.source).toString("base64"),
+        },
+      };
+    } else if (positionals[0] === "backup") {
       const workspaceRequest = (
         command: string,
         args: Record<string, unknown>,
@@ -199,7 +239,7 @@ async function main(): Promise<void> {
       if (!command)
         throw new RiloomError(
           "INVALID_INPUT",
-          "请选择 studio、mcp、project create/list/get、backup、call 或 stop",
+          "请选择 studio、mcp、project create/list/get、asset import、backup、call 或 stop",
         );
       request = {
         requestId: randomUUID(),

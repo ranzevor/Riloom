@@ -57,6 +57,20 @@ Studio 自动保存最多保留一个在途请求，后续输入在前次保存�
 
 浏览器使用启动链接中的一次性短期凭据建立会话。服务校验回环 Host、同源 Origin、会话 Cookie 和写请求的 CSRF 值。SSE 以 projectId 和 after 订阅，重连优先使用 Last-Event-ID；事件包含工程身份、序号、修订和操作身份。IPC 校验操作系统提供的对端身份，再完成绑定工作区与服务世代的授权握手。
 
+### PNG 素材与绘画
+
+riloom.asset.import 使用工程作用域和命令版本 1.0.0，输入 name、pngBase64 与 expectedDraftVersion。可指定 draftId、editorId、baseRevision 和 baseStateHash，以追加到已有编辑草稿。省略 draftId 时建立独立草稿。返回 asset、drawing、draft、candidate 及像素统计，绘画通过 riloom.project.apply 应用。
+
+同请求重投返回原导入结果。草稿版本变化或来源不符时返回 REVISION_CONFLICT。导入保持原 PNG 及完整解码通道，初始绘画按原尺寸居中放置。
+
+每份草稿最多包含 256 项更改，导入生成的格式升级、素材和绘画更改计入同一上限。超限返回 INVALID_INPUT，原草稿和已登记资源保持有效；应用当前草稿后可继续导入。
+
+riloom.asset.read 输入已登记的 blob 引用，可附 offset 和 length。length 最大为 4 MiB，返回当前段的 Base64 data、offset、bytes 和 nextOffset。读取下一段时使用 nextOffset，直到等于 bytes。读取需要当前工程会话授权，内容与登记不符时返回 DATA_CORRUPT。
+
+当前 PNG 输入上限为 16 MiB、800 万像素，接受 8/16 位 sRGB、灰度和索引图像及透明度。无色彩配置按 sRGB 解释。嵌入 ICC、cICP、其他色域或伽马配置返回 UNSUPPORTED_FEATURE，转换为 sRGB PNG 后可导入。原文件与解码像素分别保存，16 位通道使用小端字节序。
+
+ChangeSet 增加 addAsset、removeAsset、addDrawItem、updateDrawItem 和 removeDrawItem。绘画字段为 id、name、assetId、x、y、visible、opacity、drawOrder、orderToken。排序按 drawOrder 升序，再按 orderToken 的 UTF-8 字节序确定同层顺序。更新提供完整 before/after，原子应用及逆操作沿用工程编辑契约。
+
 ### 工程备份命令
 
 备份操作使用工作区作用域，便于在工程数据损坏时读取备份并恢复登记。全部命令版本为 1.0.0。
@@ -181,7 +195,7 @@ HTTP、MCP、CLI 和 SDK 使用同一个受验封套与回执。不以新 reques
 
 首次客户端授权通过受保护的本地启动交接取得短期单次引导凭据。服务核验后签发会话能力，绑定 clientId、workspaceId、启动世代、允许的工程与命令类别、期限，以及工程当前 storageGeneration。引导材料与会话能力均不写入发现记录、工程或日志。已有客户端重连时重新校验当前授权，服务重启、授权撤销或工程恢复接替均使旧能力失效。每次请求及排队步骤产生副作用前重新校验当前授权与目标世代。权限不足返回 PERMISSION_DENIED，并拒绝登记与派发。M1 分平台选定并验证对端核对和引导交接机制，CLI/MCP 自动连接沿用同一授权路径。
 
-本地 IPC 使用 riloom.ipc/1 握手和长度前缀 UTF-8 JSON 帧（32 位无符号小端长度，单帧最多 8 MiB）；大对象通过登记的文件引用获取。消息区分 request/response/event，响应关联 requestId，通知不伪装为请求。协议版本不相容时在接收命令前拒绝。MCP stdio 遵循协商后的 MCP 协议，不使用这套内部帧格式。
+本地 IPC 使用 riloom.ipc/1 握手和长度前缀 UTF-8 JSON 帧（32 位无符号小端长度，单帧最多 24 MiB）；大对象通过登记的文件引用获取。消息区分 request/response/event，响应关联 requestId，通知不伪装为请求。协议版本不相容时在接收命令前拒绝。MCP stdio 遵循协商后的 MCP 协议，不使用这套内部帧格式。
 
 Worker 使用独立 riloom.worker/1 协议：hello、start、progress、checkpoint、artifact、result、cancel 和 stopped。每条消息绑定 jobId、stepId 与 leaseEpoch；单帧最多 1 MiB。宿主收到 cancel 的受理响应后继续等待实际停止及资源回收。诊断写 stderr，不污染协议输出。
 

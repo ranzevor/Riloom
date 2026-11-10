@@ -12,7 +12,8 @@
     "@riloom/contracts": "workspace:*",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "@riloom/core": "workspace:*"
+    "@riloom/core": "workspace:*",
+    "@riloom/renderer": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

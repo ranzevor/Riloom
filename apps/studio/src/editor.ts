@@ -1,7 +1,10 @@
-import { applyChanges } from "@riloom/core";
+import { applyChanges, orderedDrawItems, canonicalJson } from "@riloom/core";
 import {
   RiloomError,
   type BackupInfo,
+  type Asset,
+  type DrawItem,
+  type BlobRef,
   type RestorePlan,
   type Candidate,
   type Change,
@@ -21,6 +24,9 @@ export interface EditorState {
   backupMessage: string | null;
   project: ProjectState | null;
   parameters: Parameter[];
+  assets: Asset[];
+  drawItems: DrawItem[];
+  selectedDrawing: string | null;
   selected: string | null;
   generation: number;
   savedGeneration: number;
@@ -47,6 +53,9 @@ export class Editor {
     backupMessage: null,
     project: null,
     parameters: [],
+    assets: [],
+    drawItems: [],
+    selectedDrawing: null,
     selected: null,
     generation: 0,
     savedGeneration: 0,
@@ -60,6 +69,7 @@ export class Editor {
   private base: ProjectModel | null = null;
   private viewGeneration = 0;
   private opening = false;
+  private rebasing = false;
   private baseRevision = 0;
   private baseHash: ProjectState["stateHash"] | null = null;
   private draftId: string = crypto.randomUUID();
@@ -69,6 +79,8 @@ export class Editor {
   private savePromise: Promise<void> | undefined;
   private pendingSave: CommandRequest | null = null;
   private pendingRestore: CommandRequest | null = null;
+  private pendingImport: CommandRequest | null = null;
+  private importing = false;
   private pendingApplication: {
     prepare: CommandRequest;
     apply?: CommandRequest;
@@ -163,6 +175,8 @@ export class Editor {
   async open(projectId: string): Promise<void> {
     if (
       this.opening ||
+      this.rebasing ||
+      this.importPending ||
       this.state.applying ||
       this.state.rechecking ||
       this.state.recovering
@@ -189,6 +203,7 @@ export class Editor {
           this.storage.getItem("riloom.draft." + projectId) ??
           crypto.randomUUID();
         this.draftVersion = 0;
+        let viewModel = project.model;
         let parameters = project.model.parameters,
           generation = 0;
         try {
@@ -204,9 +219,10 @@ export class Editor {
             this.base = result.base as ProjectModel;
             this.baseRevision = draft.baseRevision;
             this.baseHash = draft.baseStateHash;
-            parameters = draft.changes.length
-              ? applyChanges(this.base, draft.changes).model.parameters
-              : this.base.parameters;
+            viewModel = draft.changes.length
+              ? applyChanges(this.base, draft.changes).model
+              : this.base;
+            parameters = viewModel.parameters;
             generation = draft.editGeneration;
             this.draftVersion = draft.draftVersion;
           } else this.draftId = crypto.randomUUID();
@@ -220,6 +236,9 @@ export class Editor {
         this.publish({
           project,
           parameters: structuredClone(parameters),
+          assets: structuredClone(viewModel.assets ?? []),
+          drawItems: structuredClone(viewModel.drawItems ?? []),
+          selectedDrawing: null,
           selected: parameters[0]?.id ?? null,
           generation,
           savedGeneration: generation,
@@ -234,7 +253,7 @@ export class Editor {
     }
   }
   select(id: string) {
-    this.publish({ selected: id });
+    this.publish({ selected: id, selectedDrawing: null });
   }
   addParameter() {
     const parameter: Parameter = {
@@ -264,7 +283,12 @@ export class Editor {
     )
       this.publish({ selected: this.state.parameters[0]?.id ?? null });
   }
-  private edited(parameters: Parameter[]) {
+  private edited(
+    parameters: Parameter[],
+    assets = this.state.assets,
+    drawItems = this.state.drawItems,
+  ) {
+    if (this.importPending || this.rebasing) return false;
     if (
       this.state.loading ||
       this.state.recovering ||
@@ -275,6 +299,8 @@ export class Editor {
       return false;
     this.publish({
       parameters,
+      assets,
+      drawItems,
       generation: this.state.generation + 1,
       error: null,
     });
@@ -301,9 +327,165 @@ export class Editor {
     );
     for (const after of this.state.parameters)
       if (!original.has(after.id)) result.push({ type: "addParameter", after });
+    const beforeAssets = this.base.assets ?? [],
+      beforeDrawings = this.base.drawItems ?? [];
+    if (this.base.formatVersion === "1.0.0" && this.state.assets.length)
+      result.unshift({ type: "setFormat", before: "1.0.0", after: "1.1.0" });
+    for (const asset of this.state.assets)
+      if (!beforeAssets.some((item) => item.id === asset.id))
+        result.push({ type: "addAsset", after: asset });
+    for (const before of beforeDrawings) {
+      const after = this.state.drawItems.find((item) => item.id === before.id);
+      if (!after) result.push({ type: "removeDrawItem", before });
+      else if (JSON.stringify(before) !== JSON.stringify(after))
+        result.push({ type: "updateDrawItem", before, after });
+    }
+    for (const after of this.state.drawItems)
+      if (!beforeDrawings.some((item) => item.id === after.id))
+        result.push({ type: "addDrawItem", after });
     return result;
   }
+  selectDrawing(id: string) {
+    this.publish({ selectedDrawing: id, selected: null });
+  }
+  updateDrawing(id: string, fields: Partial<DrawItem>) {
+    this.edited(
+      this.state.parameters,
+      this.state.assets,
+      this.state.drawItems.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              ...fields,
+              id,
+              assetId: item.assetId,
+              orderToken: item.orderToken,
+            }
+          : item,
+      ),
+    );
+  }
+  removeDrawing(id: string) {
+    if (
+      this.edited(
+        this.state.parameters,
+        this.state.assets,
+        this.state.drawItems.filter((item) => item.id !== id),
+      )
+    )
+      this.publish({ selectedDrawing: null });
+  }
+  moveDrawing(id: string, direction: -1 | 1) {
+    const sorted = orderedDrawItems(this.state.drawItems);
+    const index = sorted.findIndex((item) => item.id === id),
+      target = index + direction;
+    if (index < 0 || target < 0 || target >= sorted.length) return;
+    const item = sorted[index]!;
+    sorted.splice(index, 1);
+    sorted.splice(target, 0, item);
+    this.edited(
+      this.state.parameters,
+      this.state.assets,
+      sorted.map((drawing, drawOrder) => ({ ...drawing, drawOrder })),
+    );
+  }
+  get importPending() {
+    return this.importing || this.pendingImport !== null;
+  }
+  async importPng(name: string, pngBase64: string): Promise<void> {
+    if (
+      !this.state.project ||
+      this.opening ||
+      this.rebasing ||
+      this.state.loading ||
+      this.state.applying ||
+      this.state.rechecking ||
+      this.state.recovering ||
+      this.importPending
+    )
+      return;
+    this.importing = true;
+    this.publish({ loading: true, error: null });
+    try {
+      await this.save();
+      if (this.state.generation !== this.state.savedGeneration) return;
+      this.pendingImport ??= {
+        requestId: crypto.randomUUID(),
+        command: "riloom.asset.import",
+        commandVersion: "1.0.0",
+        projectId: this.state.project.model.projectId,
+        expectedDraftVersion: this.draftVersion,
+        expectedStorageGeneration: this.state.project.storageGeneration,
+        arguments: {
+          name,
+          pngBase64,
+          draftId: this.draftId,
+          editorId: this.editorId,
+          baseRevision: this.baseRevision,
+          baseStateHash: this.baseHash,
+        },
+      };
+      await this.retryImport();
+    } finally {
+      this.importing = false;
+      this.publish({ loading: false });
+    }
+  }
+  async retryImport(): Promise<void> {
+    if (!this.pendingImport || !this.base) return;
+    this.publish({ loading: true, error: null });
+    try {
+      const result = await this.execute(this.pendingImport);
+      if (result.status === "failed")
+        throw new RiloomError(
+          result.error!.code,
+          result.error!.message,
+          result.error!.details,
+        );
+      const draft = result.result.draft as Draft;
+      const model = applyChanges(this.base, draft.changes).model;
+      this.draftVersion = draft.draftVersion;
+      this.pendingImport = null;
+      this.publish({
+        parameters: model.parameters,
+        assets: model.assets ?? [],
+        drawItems: model.drawItems ?? [],
+        selected: null,
+        selectedDrawing: (result.result.drawing as DrawItem).id,
+        generation: draft.editGeneration,
+        savedGeneration: draft.editGeneration,
+      });
+    } catch (error) {
+      if (error instanceof RiloomError && error.code !== "EFFECT_UNRESOLVED")
+        this.pendingImport = null;
+      this.showError(error);
+    } finally {
+      this.publish({ loading: false });
+    }
+  }
+  async readPixels(reference: BlobRef, projectId: string): Promise<Uint8Array> {
+    const output = new Uint8Array(reference.bytes);
+    let offset = 0;
+    while (offset < reference.bytes) {
+      const result = (
+        await this.call(
+          "riloom.asset.read",
+          { blob: reference, offset },
+          projectId,
+        )
+      ).result;
+      const chunk = Uint8Array.from(atob(result.data as string), (character) =>
+        character.charCodeAt(0),
+      );
+      if (!chunk.length || offset + chunk.length > output.length)
+        throw new Error("素材响应长度无效");
+      output.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return output;
+  }
   async save(): Promise<void> {
+    if (this.pendingImport) return;
     clearTimeout(this.timer);
     if (this.savePromise) return this.savePromise;
     const run = async () => {
@@ -360,6 +542,8 @@ export class Editor {
   async apply(): Promise<void> {
     if (
       !this.state.project ||
+      this.importPending ||
+      this.rebasing ||
       (!this.changes().length && !this.pendingApplication) ||
       this.state.applying
     )
@@ -441,13 +625,22 @@ export class Editor {
     this.publish({
       project,
       parameters: structuredClone(project.model.parameters),
+      assets: structuredClone(project.model.assets ?? []),
+      drawItems: structuredClone(project.model.drawItems ?? []),
+      selectedDrawing: null,
       generation: 0,
       savedGeneration: 0,
       error: null,
     });
   }
   async refreshCurrent(): Promise<void> {
-    if (!this.state.project || this.state.applying || this.state.loading)
+    if (
+      !this.state.project ||
+      this.importPending ||
+      this.rebasing ||
+      this.state.applying ||
+      this.state.loading
+    )
       return;
     const view = this.viewGeneration,
       projectId = this.state.project.model.projectId;
@@ -456,6 +649,8 @@ export class Editor {
         .result.project as ProjectState;
       if (
         view !== this.viewGeneration ||
+        this.importPending ||
+        this.rebasing ||
         this.state.applying ||
         this.state.loading ||
         project.revision < this.state.project!.revision
@@ -493,14 +688,19 @@ export class Editor {
     if (
       !this.state.project ||
       !this.base ||
+      this.opening ||
+      this.rebasing ||
+      this.importPending ||
       this.state.applying ||
       this.state.rechecking ||
       this.state.loading
     )
       return;
-    if (this.savePromise) await this.savePromise;
-    const changes = this.changes();
+    this.rebasing = true;
+    this.publish({ loading: true, error: null });
     try {
+      if (this.savePromise) await this.savePromise;
+      const changes = this.changes();
       const project = (
         await this.call("riloom.project.open", {
           projectId: this.state.project.model.projectId,
@@ -522,7 +722,7 @@ export class Editor {
           parameters.set(change.after.id, change.after);
         } else if (change.type === "removeParameter")
           parameters.delete(change.before.id);
-        else {
+        else if (change.type === "updateParameter") {
           const current = parameters.get(change.before.id);
           if (!current)
             throw new RiloomError(
@@ -535,11 +735,73 @@ export class Editor {
           }
         }
       }
+      let rebased = { ...project.model, parameters: [...parameters.values()] };
+      for (const change of changes) {
+        if (
+          change.type === "addParameter" ||
+          change.type === "removeParameter" ||
+          change.type === "updateParameter"
+        )
+          continue;
+        if (
+          change.type === "setFormat" &&
+          rebased.formatVersion === change.after
+        )
+          continue;
+        if (change.type === "addAsset") {
+          const existing = rebased.assets?.find(
+            (asset) => asset.id === change.after.id,
+          );
+          if (existing) {
+            if (canonicalJson(existing) !== canonicalJson(change.after))
+              throw new RiloomError(
+                "REVISION_CONFLICT",
+                "导入素材与当前工程冲突",
+              );
+            continue;
+          }
+        }
+        if (change.type === "updateDrawItem") {
+          const current = rebased.drawItems?.find(
+            (item) => item.id === change.before.id,
+          );
+          if (!current)
+            throw new RiloomError(
+              "REVISION_CONFLICT",
+              "本次编辑的绘画已经删除",
+            );
+          const after = { ...current };
+          for (const key of [
+            "name",
+            "x",
+            "y",
+            "visible",
+            "opacity",
+            "drawOrder",
+          ] as const)
+            if (change.before[key] !== change.after[key])
+              Object.assign(after, { [key]: change.after[key] });
+          if (JSON.stringify(current) !== JSON.stringify(after))
+            rebased = applyChanges(rebased, [
+              { ...change, before: current, after },
+            ]).model;
+        } else {
+          rebased = applyChanges(rebased, [change]).model;
+        }
+      }
       this.acceptProject(project);
-      this.edited([...parameters.values()]);
+      this.publish({
+        parameters: rebased.parameters,
+        assets: rebased.assets ?? [],
+        drawItems: rebased.drawItems ?? [],
+        generation: this.state.generation + 1,
+      });
       await this.save();
     } catch (error) {
       this.showError(error);
+    } finally {
+      this.rebasing = false;
+      this.publish({ loading: false });
     }
   }
   async navigate(direction: "undo" | "redo"): Promise<void> {

@@ -15,7 +15,8 @@
     "format": "prettier --check \"apps/**/*.{ts,tsx,css,json,html}\" \"packages/**/*.{ts,json}\" \"tests/**/*.{ts,mjs,json}\" \"*.{json,mjs,ts,yaml}\"",
     "check:docs": "node scripts/check-docs.mjs",
     "check": "pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm check:docs",
-    "start": "node apps/cli/dist/index.js"
+    "start": "node apps/cli/dist/index.js",
+    "test:browser": "vitest run --config vitest.browser.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -26,6 +27,9 @@
     "prettier": "3.9.10",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.0",
+    "pngjs": "7.0.0",
+    "@types/pngjs": "6.0.5",
+    "playwright": "1.56.1"
   }
 }

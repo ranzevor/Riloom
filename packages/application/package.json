@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@riloom/contracts": "workspace:*",
-    "@riloom/core": "workspace:*"
+    "@riloom/core": "workspace:*",
+    "@riloom/image": "workspace:*"
   }
 }

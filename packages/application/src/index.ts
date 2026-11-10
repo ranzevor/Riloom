@@ -15,14 +15,19 @@ import {
   type Draft,
   type Receipt,
   type StateHash,
+  type Asset,
+  type DrawItem,
+  type BlobRef,
 } from "@riloom/contracts";
 import {
   applyChanges,
   asJson,
   canonicalJson,
   validateModel,
+  changeBlobs,
 } from "@riloom/core";
 import type { ProjectTransaction, WorkspacePersistence } from "./ports.js";
+import { decodePng } from "@riloom/image";
 export * from "./ports.js";
 
 export function hashValue(value: unknown): StateHash {
@@ -87,10 +92,12 @@ export class Application {
         };
         const model = {
           projectId: randomUUID(),
-          formatVersion: version as "1.0.0",
+          formatVersion: "1.1.0" as const,
           name: args.name,
           canvas: args.canvas,
           parameters: [],
+          assets: [],
+          drawItems: [],
         };
         validateModel(model);
         return this.workspace.createProject({
@@ -170,6 +177,23 @@ export class Application {
       return store.read((tx) => {
         let result: Record<string, unknown>;
         switch (request.command) {
+          case "riloom.asset.read": {
+            const data = tx.readBlob(request.arguments.blob as BlobRef);
+            const offset =
+              (request.arguments.offset as number | undefined) ?? 0;
+            const length =
+              (request.arguments.length as number | undefined) ?? 4194304;
+            if (offset > data.byteLength)
+              throw new RiloomError("INVALID_INPUT", "素材读取位置超出范围");
+            const chunk = data.subarray(offset, offset + length);
+            result = {
+              data: Buffer.from(chunk).toString("base64"),
+              offset,
+              bytes: data.byteLength,
+              nextOffset: offset + chunk.length,
+            };
+            break;
+          }
           case "riloom.project.get":
             result = { project: tx.state() };
             break;
@@ -273,6 +297,100 @@ export class Application {
     operationId: string,
   ): Record<string, unknown> {
     const args = request.arguments;
+    if (request.command === "riloom.asset.import") {
+      const state = tx.state();
+      const draftId = (args.draftId as string | undefined) ?? randomUUID();
+      const previous = tx.draft(draftId);
+      if (previous) requireDraft(tx, draftId, request.expectedDraftVersion);
+      else if (request.expectedDraftVersion !== 0)
+        throw new RiloomError("REVISION_CONFLICT", "新草稿必须从版本零创建");
+      const baseRevision =
+        (args.baseRevision as number | undefined) ??
+        previous?.baseRevision ??
+        state.revision;
+      const baseStateHash =
+        (args.baseStateHash as StateHash | undefined) ??
+        previous?.baseStateHash ??
+        state.stateHash;
+      const base = tx.modelAt(baseRevision);
+      if (!sameHash(hashValue(base), baseStateHash))
+        throw new RiloomError("REVISION_CONFLICT", "导入来源与工程记录不符");
+      const encoded = args.pngBase64 as string,
+        source = Buffer.from(encoded, "base64");
+      if (source.toString("base64") !== encoded)
+        throw new RiloomError("INVALID_INPUT", "PNG 编码无效");
+      const image = decodePng(source);
+      const sourceRef = tx.putBlob(source),
+        pixelsRef = tx.putBlob(image.pixels);
+      const asset: Asset = {
+        id: randomUUID(),
+        name: args.name as string,
+        width: image.width,
+        height: image.height,
+        bitDepth: image.bitDepth,
+        source: sourceRef,
+        pixels: pixelsRef,
+        colorSpace: "srgb",
+        colorSource: image.colorSource,
+      };
+      const current = previous?.changes.length
+        ? applyChanges(base, previous.changes).model
+        : base;
+      const drawOrder =
+        Math.max(
+          -1,
+          ...(current.drawItems ?? []).map((item) => item.drawOrder),
+        ) + 1;
+      const drawing: DrawItem = {
+        id: randomUUID(),
+        name: asset.name,
+        assetId: asset.id,
+        x: (base.canvas.width - asset.width) / 2,
+        y: (base.canvas.height - asset.height) / 2,
+        visible: true,
+        opacity: 1,
+        drawOrder,
+        orderToken: randomUUID(),
+      };
+      const changes: Change[] = [...(previous?.changes ?? [])];
+      if (current.formatVersion === "1.0.0")
+        changes.push({ type: "setFormat", before: "1.0.0", after: "1.1.0" });
+      changes.push(
+        { type: "addAsset", after: asset },
+        { type: "addDrawItem", after: drawing },
+      );
+      const saved = this.edit(
+        tx,
+        validateRequest({
+          ...request,
+          command: "riloom.project.saveDraft",
+          arguments: {
+            draftId,
+            editorId:
+              (args.editorId as string | undefined) ??
+              previous?.editorId ??
+              "asset-import",
+            baseRevision,
+            baseStateHash,
+            editGeneration: (previous?.editGeneration ?? 0) + 1,
+            changes,
+          },
+        }),
+        operationId,
+      );
+      const draft = saved.draft as Draft;
+      const prepared = this.edit(
+        tx,
+        {
+          ...request,
+          command: "riloom.project.prepareDraft",
+          expectedDraftVersion: draft.draftVersion,
+          arguments: { draftId },
+        },
+        operationId,
+      );
+      return { ...prepared, asset, drawing, draft, analysis: image.analysis };
+    }
     if (request.command === "riloom.project.saveDraft") {
       const fields = args as unknown as {
         draftId: string;
@@ -301,6 +419,21 @@ export class Application {
       const base = tx.modelAt(fields.baseRevision);
       if (!sameHash(hashValue(base), fields.baseStateHash))
         throw new RiloomError("REVISION_CONFLICT", "草稿基线与工程记录不符");
+      tx.requireBlobs(changeBlobs(fields.changes));
+      for (const change of fields.changes) {
+        if (change.type !== "addAsset") continue;
+        const asset = change.after;
+        const image = decodePng(tx.readBlob(asset.source));
+        const digest = createHash("sha256").update(image.pixels).digest("hex");
+        if (
+          image.width !== asset.width ||
+          image.height !== asset.height ||
+          image.bitDepth !== asset.bitDepth ||
+          image.colorSource !== asset.colorSource ||
+          digest !== asset.pixels.hash.digest
+        )
+          throw new RiloomError("INVALID_INPUT", "素材描述与原始图像不一致");
+      }
       const calculated = fields.changes.length
         ? applyChanges(base, fields.changes)
         : { model: base, inverse: [] };

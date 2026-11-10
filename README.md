@@ -4,7 +4,7 @@
 
 **本地优先、可编程的二维角色制作工作台。**
 
-[![Stage: M1](https://img.shields.io/badge/Stage-M1-7C3AED)](#status)
+[![Stage: M2](https://img.shields.io/badge/Stage-M2-7C3AED)](#status)
 [![Code: Apache-2.0](https://img.shields.io/badge/Code-Apache--2.0-2563EB)](LICENSE)
 [![Docs: CC BY 4.0](https://img.shields.io/badge/Docs-CC%20BY%204.0-2563EB)](LICENSE)
 
@@ -19,7 +19,7 @@ Riloom 面向角色美术、模型制作者和自动化工具开发者，将分�
 <a id="status"></a>
 ## 当前阶段
 
-当前处于 **M1 工程底座开发阶段**。已实现工程创建、参数草稿编辑与保存、候选准备、原子应用、共享撤销重做及重启恢复。Studio、MCP、CLI 和 SDK 共用本地工作区服务。
+当前推进 **M2 素材与自由制作**。已实现工程创建、PNG 导入与图层视口、参数和绘画草稿、候选应用、共享撤销重做、保存重开及工程备份恢复。Studio、MCP、CLI 和 SDK 共用本地工作区服务。
 
 首版按“工程底座 → 自由制作 → 表现与返修 → 原生适配与独立交付”推进。各阶段的范围和完成条件见[实施路线图](docs/project/roadmap.md)。
 
@@ -47,17 +47,18 @@ pnpm build
 pnpm start -- studio --workspace ./.local/workspace
 ```
 
-在浏览器中打开命令输出的启动链接，创建工程并添加参数。参数修改会自动保存为草稿，选择“应用草稿”后更新工程；关闭并重新打开工作台可继续编辑。工作区服务由首次调用启动，多个入口共用同一实例。
+在浏览器中打开命令输出的启动链接，创建工程，点击“图层”旁的加号导入 PNG。选择图层后可修改名称、位置、显隐、透明度和排序。参数与图层修改自动保存为草稿，选择“应用草稿”后更新工程。关闭并重新打开工作台可继续编辑。工作区服务由首次调用启动，多个入口共用同一实例。
 
 顶栏“备份与恢复”可创建、导入和恢复工程备份。恢复使用新工程目录，并自动重新打开工程。其他客户端通过重新打开工程接入新的存储世代。
 
 ```sh
+pnpm start -- asset import --workspace ./.local/workspace --project <project-id> --source ./artwork.png
 pnpm start -- project list --workspace ./.local/workspace --json
 pnpm start -- mcp --workspace ./.local/workspace
 pnpm start -- stop --workspace ./.local/workspace
 ```
 
-MCP 客户端以第二条命令启动 stdio 桥。关闭桥接进程后，工作区服务继续运行；第三条命令停止指定工作区。完整命令封套及草稿流程见[命令与任务](docs/reference/commands-and-tasks.md#project-editing-entry)。
+MCP 客户端使用 mcp 命令启动 stdio 桥。关闭桥接进程后，工作区服务继续运行；stop 命令停止指定工作区。完整命令封套及草稿流程见[命令与任务](docs/reference/commands-and-tasks.md#project-editing-entry)。
 
 ### 阅读设计
 

@@ -22,6 +22,7 @@ import {
   RiloomError,
   validateRequest,
   type BackupInfo,
+  type BlobRef,
   type RestoreExpectation,
   type RestorePlan,
   type Candidate,
@@ -32,7 +33,13 @@ import {
   type Receipt,
   type RegisteredProject,
 } from "@riloom/contracts";
-import { applyChanges, canonicalJson, validateModel } from "@riloom/core";
+import {
+  applyChanges,
+  canonicalJson,
+  validateModel,
+  modelBlobs,
+  changeBlobs,
+} from "@riloom/core";
 import {
   hashValue,
   sameHash,
@@ -58,6 +65,8 @@ import {
   type BackupManifest,
 } from "./backup-files.js";
 
+import { writeBlobFile, readBlobFile, copyBlobFiles } from "./blobs.js";
+
 const applicationId = 0x52494c4d;
 function parse<T>(value: string): T {
   try {
@@ -69,7 +78,7 @@ function parse<T>(value: string): T {
 function database(
   filename: string,
   initialize: boolean,
-  maxVersion = 1,
+  maxVersion = 2,
   readOnly = false,
 ): DatabaseSync {
   if (!initialize && !existsSync(filename))
@@ -144,6 +153,7 @@ function flushDirectory(directory: string): void {
   }
 }
 const projectSchema = `
+CREATE TABLE blobs (digest TEXT PRIMARY KEY, bytes INTEGER NOT NULL);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE objects (id TEXT PRIMARY KEY, position INTEGER NOT NULL UNIQUE, data TEXT NOT NULL);
 CREATE TABLE revisions (revision INTEGER PRIMARY KEY, operation_id TEXT NOT NULL, forward TEXT NOT NULL, inverse TEXT NOT NULL);
@@ -158,6 +168,7 @@ function initializeProject(filename: string, input: CreateProjectInput): void {
   try {
     transaction(db, true, () => {
       db.exec(projectSchema);
+      db.exec("PRAGMA user_version=2");
       const values: Record<string, unknown> = {
         model: { ...input.model, parameters: [] },
         revision: 0,
@@ -181,7 +192,50 @@ function initializeProject(filename: string, input: CreateProjectInput): void {
   flushFile(filename);
 }
 class ProjectTransactionImpl implements ProjectTransaction {
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(
+    private readonly db: DatabaseSync,
+    private readonly directory: string,
+  ) {}
+  blobs(): BlobRef[] {
+    if (
+      !this.db
+        .prepare("SELECT name FROM sqlite_schema WHERE name='blobs'")
+        .get()
+    )
+      return [];
+    return (
+      this.db
+        .prepare("SELECT digest,bytes FROM blobs ORDER BY digest")
+        .all() as { digest: string; bytes: number }[]
+    ).map((row) => ({
+      hash: { algorithm: "sha256", digest: row.digest },
+      bytes: row.bytes,
+    }));
+  }
+  putBlob(data: Uint8Array): BlobRef {
+    const reference = writeBlobFile(this.directory, data);
+    this.db
+      .prepare("INSERT OR IGNORE INTO blobs VALUES (?,?)")
+      .run(reference.hash.digest, reference.bytes);
+    this.readBlob(reference);
+    return reference;
+  }
+  readBlob(reference: BlobRef): Uint8Array {
+    const row = this.db
+      .prepare("SELECT bytes FROM blobs WHERE digest=?")
+      .get(reference.hash.digest) as { bytes: number } | undefined;
+    if (!row || row.bytes !== reference.bytes)
+      throw new RiloomError("NOT_FOUND", "素材引用未登记");
+    return readBlobFile(this.directory, reference);
+  }
+  requireBlobs(references: BlobRef[]): void {
+    const checked = new Set<string>();
+    for (const reference of references) {
+      const key = reference.hash.digest + ":" + reference.bytes;
+      if (!checked.has(key)) this.readBlob(reference);
+      checked.add(key);
+    }
+  }
   private get<T>(key: string): T {
     const row = this.db
       .prepare("SELECT value FROM meta WHERE key=?")
@@ -401,6 +455,7 @@ class ProjectTransactionImpl implements ProjectTransaction {
     navigation?: { direction: "undo" | "redo"; group: HistoryGroup },
   ): ProjectState {
     validateModel(model);
+    this.requireBlobs(modelBlobs(model));
     const revision = this.get<number>("revision") + 1;
     this.db.exec("DELETE FROM objects");
     for (const [index, parameter] of model.parameters.entries())
@@ -475,7 +530,10 @@ class ProjectTransactionImpl implements ProjectTransaction {
     }
   }
 }
-function validateStoredProject(db: DatabaseSync): ProjectState {
+function validateStoredProject(
+  db: DatabaseSync,
+  directory: string,
+): ProjectState {
   try {
     const expectedTables = [
       "candidates",
@@ -487,6 +545,11 @@ function validateStoredProject(db: DatabaseSync): ProjectState {
       "operations",
       "revisions",
     ];
+    if (
+      (db.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version >= 2
+    )
+      expectedTables.push("blobs");
     const definitions = db
       .prepare(
         "SELECT type,name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
@@ -500,8 +563,9 @@ function validateStoredProject(db: DatabaseSync): ProjectState {
     ) {
       throw new RiloomError("DATA_CORRUPT", "工程数据表结构无效");
     }
-    const tx = new ProjectTransactionImpl(db),
+    const tx = new ProjectTransactionImpl(db, directory),
       state = tx.state();
+    tx.requireBlobs([...tx.blobs(), ...modelBlobs(state.model)]);
     const rows = db
       .prepare(
         "SELECT revision,forward,inverse FROM revisions ORDER BY revision",
@@ -515,6 +579,10 @@ function validateStoredProject(db: DatabaseSync): ProjectState {
     let current = state.model;
     for (let index = rows.length - 1; index >= 0; index--) {
       const row = rows[index]!;
+      tx.requireBlobs([
+        ...changeBlobs(parse<Change[]>(row.forward)),
+        ...changeBlobs(parse<Change[]>(row.inverse)),
+      ]);
       if (row.revision !== index + 1)
         throw new RiloomError("DATA_CORRUPT", "工程历史修订不连续");
       const previous = applyChanges(
@@ -536,6 +604,7 @@ function validateStoredProject(db: DatabaseSync): ProjectState {
       changes: Change[],
       inverse: Change[],
     ) => {
+      tx.requireBlobs([...changeBlobs(changes), ...changeBlobs(inverse)]);
       const model = models.get(revision);
       if (!model || !sameHash(hashValue(model), stateHash))
         throw new RiloomError("DATA_CORRUPT", "编辑来源与工程历史不一致");
@@ -636,7 +705,7 @@ class ProjectDatabase implements ProjectPersistence {
   readonly db: DatabaseSync;
   readonly lock: OwnerLock;
   constructor(
-    directory: string,
+    readonly directory: string,
     projectId: string,
     lockDirectory: string,
     private readonly checkpoint?: StorageOptions["checkpoint"],
@@ -657,6 +726,18 @@ class ProjectDatabase implements ProjectPersistence {
         path.join(directory, "project.sqlite"),
         false,
       );
+      if (
+        (
+          this.db.prepare("PRAGMA user_version").get() as {
+            user_version: number;
+          }
+        ).user_version === 1
+      )
+        transaction(this.db, true, () =>
+          this.db.exec(
+            "CREATE TABLE blobs (digest TEXT PRIMARY KEY, bytes INTEGER NOT NULL); PRAGMA user_version=2;",
+          ),
+        );
       if (this.read((tx) => tx.state().model.projectId) !== projectId)
         throw new RiloomError("DATA_CORRUPT", "工程目录身份不符");
     } catch (error) {
@@ -667,12 +748,12 @@ class ProjectDatabase implements ProjectPersistence {
   }
   read<T>(run: (tx: ProjectTransaction) => T): T {
     return transaction(this.db, false, () =>
-      run(new ProjectTransactionImpl(this.db)),
+      run(new ProjectTransactionImpl(this.db, this.directory)),
     );
   }
   write<T>(run: (tx: ProjectTransaction) => T): T {
     return transaction(this.db, true, () => {
-      const result = run(new ProjectTransactionImpl(this.db));
+      const result = run(new ProjectTransactionImpl(this.db, this.directory));
       this.checkpoint?.("before-project-commit");
       return result;
     });
@@ -931,7 +1012,7 @@ export class SQLiteWorkspace implements WorkspacePersistence {
         if (!operation || parse<string>(operation.value) !== intent.operationId)
           throw new RiloomError("RESOURCE_BUSY", "目标目录属于另一项创建操作");
         state = transaction(project, false, () =>
-          new ProjectTransactionImpl(project).state(),
+          new ProjectTransactionImpl(project, target).state(),
         );
         if (state.model.projectId !== intent.model.projectId)
           throw new RiloomError("DATA_CORRUPT", "新工程身份不符");
@@ -1064,9 +1145,14 @@ export class SQLiteWorkspace implements WorkspacePersistence {
     state: ProjectState;
   } {
     const manifest = readBackup(directory),
-      db = database(path.join(directory, "project.sqlite"), false, 1, true);
+      db = database(path.join(directory, "project.sqlite"), false, 2, true);
     try {
-      const state = transaction(db, false, () => validateStoredProject(db));
+      const state = transaction(db, false, () =>
+        validateStoredProject(db, directory),
+      );
+      const references = new ProjectTransactionImpl(db, directory).blobs();
+      if (canonicalJson(references) !== canonicalJson(manifest.blobs ?? []))
+        throw new RiloomError("DATA_CORRUPT", "备份素材登记与清单不一致");
       if (
         state.model.projectId !== manifest.projectId ||
         state.model.name !== manifest.projectName ||
@@ -1103,11 +1189,11 @@ export class SQLiteWorkspace implements WorkspacePersistence {
       db = database(
         path.join(this.target(row.directory), "project.sqlite"),
         false,
-        1,
+        2,
         true,
       );
       const state = transaction(db, false, () =>
-        new ProjectTransactionImpl(db!).state(),
+        new ProjectTransactionImpl(db!, this.target(row.directory)).state(),
       );
       if (state.storageGeneration !== row.generation)
         throw new RiloomError("DATA_CORRUPT", "工程存储世代与登记不一致");
@@ -1330,16 +1416,28 @@ export class SQLiteWorkspace implements WorkspacePersistence {
                 "工程已变化，请重新创建备份",
               );
             project.db.prepare("VACUUM main INTO ?").run(partial);
-            const copy = database(partial, false, 1, true);
+            const copy = database(partial, false, 2, true);
             let captured: ProjectState;
+            let references: BlobRef[];
             try {
+              references = new ProjectTransactionImpl(
+                copy,
+                project.directory,
+              ).blobs();
+              copyBlobFiles(project.directory, content, references);
               captured = transaction(copy, false, () =>
-                validateStoredProject(copy),
+                validateStoredProject(copy, content),
               );
             } finally {
               copy.close();
             }
-            writeManifest(content, intent.backupId, intent.createdAt, captured);
+            writeManifest(
+              content,
+              intent.backupId,
+              intent.createdAt,
+              captured,
+              references!,
+            );
           }
           this.backupState(content);
         } else if (intent.kind === "import") {
@@ -1356,6 +1454,7 @@ export class SQLiteWorkspace implements WorkspacePersistence {
           const filename = path.join(content, "project.sqlite");
           if (existsSync(filename)) unlinkSync(filename);
           copyFileSync(path.join(source, "project.sqlite"), filename, 1);
+          copyBlobFiles(source, content, readBackup(source).blobs ?? []);
           const db = database(filename, false);
           try {
             transaction(db, true, () => {
