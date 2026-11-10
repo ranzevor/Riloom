@@ -4,7 +4,7 @@
 
 **A local-first, programmable workbench for 2D character authoring.**
 
-[![Stage: M1](https://img.shields.io/badge/Stage-M1-7C3AED)](#status)
+[![Stage: M2](https://img.shields.io/badge/Stage-M2-7C3AED)](#status)
 [![Code: Apache-2.0](https://img.shields.io/badge/Code-Apache--2.0-2563EB)](LICENSE)
 [![Docs: CC BY 4.0](https://img.shields.io/badge/Docs-CC%20BY%204.0-2563EB)](LICENSE)
 
@@ -19,7 +19,7 @@ The design connects two ways of working. Riloom Studio provides a canvas-centere
 <a id="status"></a>
 ## Project status
 
-The project is in **M1 foundation development**. Project creation, parameter draft editing and saving, candidate preparation, atomic application, shared undo and redo, and restart recovery are implemented. Studio, MCP, CLI, and SDK clients share one local workspace service.
+The project is developing **M2 artwork and free-form authoring**. Project creation, PNG import and layer rendering, parameter and drawing drafts, candidate application, shared undo and redo, reopening, and project backup and recovery are implemented. Studio, MCP, CLI, and SDK clients share one local workspace service.
 
 The first version progresses through the project foundation, free-form authoring, expression and repair workflows, and native integration with standalone delivery. See the [roadmap](docs/project/roadmap.md) for each stage and its completion criteria.
 
@@ -47,17 +47,18 @@ pnpm build
 pnpm start -- studio --workspace ./.local/workspace
 ```
 
-Open the printed launch link in a browser, create a project, and add a parameter. Edits are saved as a draft automatically. Select “应用草稿” to apply the draft, then close and reopen the workbench to continue editing. The first command starts the workspace service, which is shared by all clients.
+Open the printed launch link in a browser, create a project, and import a PNG using the plus button next to the layer panel. Select a layer to edit its name, position, visibility, opacity, and order. Parameter and layer edits are saved as a draft automatically. Select “应用草稿” to apply the draft, then close and reopen the workbench to continue editing. The first command starts the workspace service, which is shared by all clients.
 
 Use “备份与恢复” in the top bar to create, import, and restore project backups. Restoration publishes a new project directory and reopens it. Other clients reopen the project to use the restored storage generation.
 
 ```sh
+pnpm start -- asset import --workspace ./.local/workspace --project <project-id> --source ./artwork.png
 pnpm start -- project list --workspace ./.local/workspace --json
 pnpm start -- mcp --workspace ./.local/workspace
 pnpm start -- stop --workspace ./.local/workspace
 ```
 
-Configure an MCP client to run the second command as a stdio bridge. Closing the bridge leaves the workspace service running. The third command stops the selected workspace. See [Commands and tasks](docs/reference/commands-and-tasks.md#project-editing-entry) for request envelopes and the draft workflow.
+Configure an MCP client to run the mcp command as a stdio bridge. Closing the bridge leaves the workspace service running. The stop command stops the selected workspace. See [Commands and tasks](docs/reference/commands-and-tasks.md#project-editing-entry) for request envelopes and the draft workflow.
 
 ### Read the design
 

@@ -1,5 +1,6 @@
 import type {
   BackupInfo,
+  BlobRef,
   RestorePlan,
   Candidate,
   Change,
@@ -19,6 +20,10 @@ export interface HistoryGroup {
 }
 export interface ProjectTransaction {
   state(): ProjectState;
+  putBlob(data: Uint8Array): BlobRef;
+  readBlob(reference: BlobRef): Uint8Array;
+  blobs(): BlobRef[];
+  requireBlobs(references: BlobRef[]): void;
   events(
     after: number,
     limit: number,

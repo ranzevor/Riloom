@@ -6,6 +6,8 @@ import {
   type Receipt,
 } from "@riloom/contracts";
 import { Editor } from "./editor.js";
+import { Viewport } from "./viewport.js";
+import { DrawingPanel, DrawingProperties } from "./drawing-panel.js";
 import { BackupPanel } from "./backup-panel.js";
 import "./style.css";
 
@@ -18,7 +20,11 @@ function Workbench({ editor }: { editor: Editor }) {
   const parameter = state.parameters.find((item) => item.id === state.selected);
   const changes = editor.changes(),
     busy =
-      state.loading || state.applying || state.rechecking || state.recovering;
+      state.loading ||
+      state.applying ||
+      state.rechecking ||
+      state.recovering ||
+      editor.importPending;
   useEffect(() => {
     void editor.initialize().catch((error) => editor.showError(error));
     const focus = () => {
@@ -129,6 +135,7 @@ function Workbench({ editor }: { editor: Editor }) {
             onClick={() => void editor.apply()}
             disabled={
               state.loading ||
+              editor.importPending ||
               state.applying ||
               (!changes.length && !state.rechecking)
             }
@@ -207,6 +214,7 @@ function Workbench({ editor }: { editor: Editor }) {
             </button>
           ))}
         </nav>
+        <DrawingPanel editor={editor} state={state} busy={busy} />
         <div className="panel-heading parameter-heading">
           <h2>参数</h2>
           <button
@@ -242,7 +250,7 @@ function Workbench({ editor }: { editor: Editor }) {
           </div>
         )}
         <div className="canvas-toolbar">
-          <span>{state.project ? "参数制作" : "工作区"}</span>
+          <span>{state.project ? "模型制作" : "工作区"}</span>
           <span>
             {state.project
               ? state.project.model.canvas.width +
@@ -252,7 +260,20 @@ function Workbench({ editor }: { editor: Editor }) {
           </span>
         </div>
         <section className="canvas" aria-label="工程工作区">
-          {state.project ? (
+          {state.project && state.assets.length ? (
+            <Viewport
+              key={state.project.model.projectId}
+              model={{
+                ...state.project.model,
+                formatVersion: "1.1.0",
+                parameters: state.parameters,
+                assets: state.assets,
+                drawItems: state.drawItems,
+              }}
+              selected={state.selectedDrawing}
+              editor={editor}
+            />
+          ) : state.project ? (
             <div className="parameter-card">
               <span className="eyebrow">PARAMETER</span>
               <h1>{parameter?.name ?? state.project.model.name}</h1>
@@ -301,7 +322,9 @@ function Workbench({ editor }: { editor: Editor }) {
           )}
         </section>
         <footer>
-          <span>{state.parameters.length} 个参数</span>
+          <span>
+            {state.drawItems.length} 个图层 · {state.parameters.length} 个参数
+          </span>
           <details>
             <summary>
               查看更改{changes.length ? " · " + changes.length : ""}
@@ -313,7 +336,12 @@ function Workbench({ editor }: { editor: Editor }) {
                     ? "新增 " + change.after.name
                     : change.type === "removeParameter"
                       ? "删除 " + change.before.name
-                      : "修改 " + change.after.name}
+                      : change.type === "setFormat"
+                        ? "更新工程格式"
+                        : "修改 " +
+                          ("after" in change
+                            ? change.after.name
+                            : change.before.name)}
                 </li>
               ))}
             </ul>
@@ -321,69 +349,77 @@ function Workbench({ editor }: { editor: Editor }) {
         </footer>
       </main>
       <aside className="properties">
-        <div className="panel-heading">
-          <h2>参数属性</h2>
-        </div>
-        {parameter ? (
-          <fieldset disabled={busy}>
-            <label>
-              名称
-              <input
-                value={parameter.name}
-                maxLength={120}
-                onChange={(event) =>
-                  editor.updateParameter(parameter.id, {
-                    name: event.target.value,
-                  })
-                }
-              />
-            </label>
-            <label>
-              单位
-              <input
-                value={parameter.unit}
-                maxLength={32}
-                onChange={(event) =>
-                  editor.updateParameter(parameter.id, {
-                    unit: event.target.value,
-                  })
-                }
-              />
-            </label>
-            {(
-              [
-                ["min", "最小值"],
-                ["default", "默认值"],
-                ["max", "最大值"],
-                ["value", "当前值"],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key}>
-                {label}
-                <input
-                  type="number"
-                  step="any"
-                  value={Number.isFinite(parameter[key]) ? parameter[key] : ""}
-                  onChange={(event) =>
-                    editor.updateParameter(parameter.id, {
-                      [key]:
-                        event.target.value === ""
-                          ? NaN
-                          : Number(event.target.value),
-                    })
-                  }
-                />
-              </label>
-            ))}
-            <button
-              className="danger"
-              onClick={() => editor.removeParameter(parameter.id)}
-            >
-              删除参数
-            </button>
-          </fieldset>
+        {state.selectedDrawing ? (
+          <DrawingProperties editor={editor} state={state} busy={busy} />
         ) : (
-          <p className="hint">选择一个参数以编辑属性。</p>
+          <>
+            <div className="panel-heading">
+              <h2>参数属性</h2>
+            </div>
+            {parameter ? (
+              <fieldset disabled={busy}>
+                <label>
+                  名称
+                  <input
+                    value={parameter.name}
+                    maxLength={120}
+                    onChange={(event) =>
+                      editor.updateParameter(parameter.id, {
+                        name: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  单位
+                  <input
+                    value={parameter.unit}
+                    maxLength={32}
+                    onChange={(event) =>
+                      editor.updateParameter(parameter.id, {
+                        unit: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                {(
+                  [
+                    ["min", "最小值"],
+                    ["default", "默认值"],
+                    ["max", "最大值"],
+                    ["value", "当前值"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <input
+                      type="number"
+                      step="any"
+                      value={
+                        Number.isFinite(parameter[key]) ? parameter[key] : ""
+                      }
+                      onChange={(event) =>
+                        editor.updateParameter(parameter.id, {
+                          [key]:
+                            event.target.value === ""
+                              ? NaN
+                              : Number(event.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+                <button
+                  className="danger"
+                  onClick={() => editor.removeParameter(parameter.id)}
+                >
+                  删除参数
+                </button>
+              </fieldset>
+            ) : (
+              <p className="hint">选择图层或参数以编辑属性。</p>
+            )}
+          </>
         )}
       </aside>
     </div>

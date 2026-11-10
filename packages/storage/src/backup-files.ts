@@ -16,13 +16,17 @@ import { createHash } from "node:crypto";
 import {
   RiloomError,
   type BackupInfo,
+  type BlobRef,
   type StateHash,
   type ProjectState,
 } from "@riloom/contracts";
 import { canonicalJson } from "@riloom/core";
 
+import { copyBlobFiles, checkBlobFiles } from "./blobs.js";
+
 export interface BackupManifest {
-  format: "riloom.backup/1";
+  format: "riloom.backup/1" | "riloom.backup/2";
+  blobs?: BlobRef[];
   backupId: string;
   projectId: string;
   projectName: string;
@@ -46,7 +50,10 @@ function validateManifest(value: unknown): BackupManifest {
   if (!value || typeof value !== "object")
     throw new RiloomError("DATA_CORRUPT", "备份清单无效");
   const manifest = value as BackupManifest;
-  if (manifest.format !== "riloom.backup/1")
+  if (
+    manifest.format !== "riloom.backup/1" &&
+    manifest.format !== "riloom.backup/2"
+  )
     throw new RiloomError("UNSUPPORTED_VERSION", "备份格式版本不受支持");
   const keys = [
     "format",
@@ -57,6 +64,7 @@ function validateManifest(value: unknown): BackupManifest {
     "revision",
     "stateHash",
     "database",
+    "blobs",
   ];
   if (
     Object.keys(manifest).some((key) => !keys.includes(key)) ||
@@ -78,6 +86,25 @@ function validateManifest(value: unknown): BackupManifest {
     !validHash(manifest.database.hash)
   ) {
     throw new RiloomError("DATA_CORRUPT", "备份清单字段无效");
+  }
+  if (
+    manifest.format === "riloom.backup/2" &&
+    (!Array.isArray(manifest.blobs) || manifest.blobs.length > 100000)
+  )
+    throw new RiloomError("DATA_CORRUPT", "备份素材清单无效");
+  const seen = new Set<string>();
+  for (const blob of manifest.blobs ?? []) {
+    if (
+      !blob ||
+      !validHash(blob.hash) ||
+      !Number.isSafeInteger(blob.bytes) ||
+      blob.bytes < 1 ||
+      blob.bytes > 67108864 ||
+      seen.has(blob.hash.digest) ||
+      Object.keys(blob).sort().join(",") !== "bytes,hash"
+    )
+      throw new RiloomError("DATA_CORRUPT", "备份素材引用无效");
+    seen.add(blob.hash.digest);
   }
   return manifest;
 }
@@ -115,11 +142,16 @@ export function readBackup(directory: string): BackupManifest {
   if (!stat.isDirectory() || stat.isSymbolicLink())
     throw new RiloomError("PERMISSION_DENIED", "备份目录不能为链接");
   const members = readdirSync(directory).sort();
-  if (members.join(",") !== "backup.json,project.sqlite")
+  if (
+    ![
+      "backup.json,project.sqlite",
+      "assets,backup.json,project.sqlite",
+    ].includes(members.join(","))
+  )
     throw new RiloomError("DATA_CORRUPT", "备份文件集合不完整");
   const filename = path.join(directory, "backup.json");
   regularFile(filename);
-  if (lstatSync(filename).size > 65536)
+  if (lstatSync(filename).size > 16 * 1024 * 1024)
     throw new RiloomError("DATA_CORRUPT", "备份清单过大");
   let parsed: unknown;
   try {
@@ -138,6 +170,10 @@ export function readBackup(directory: string): BackupManifest {
   ) {
     throw new RiloomError("DATA_CORRUPT", "备份数据库与清单不一致");
   }
+  if (manifest.format === "riloom.backup/2")
+    checkBlobFiles(directory, manifest.blobs ?? []);
+  else if (manifest.blobs?.length)
+    throw new RiloomError("DATA_CORRUPT", "备份格式与素材清单不符");
   return manifest;
 }
 export function writeManifest(
@@ -145,11 +181,13 @@ export function writeManifest(
   backupId: string,
   createdAt: string,
   state: ProjectState,
+  blobs: BlobRef[] = [],
 ): BackupManifest {
   const filename = path.join(directory, "project.sqlite");
   flush(filename);
   const manifest: BackupManifest = {
-    format: "riloom.backup/1",
+    format: "riloom.backup/2",
+    blobs,
     backupId,
     projectId: state.model.projectId,
     projectName: state.model.name,
@@ -177,13 +215,16 @@ export function backupInfo(
     createdAt: manifest.createdAt,
     revision: manifest.revision,
     stateHash: manifest.stateHash,
-    bytes: manifest.database.bytes,
+    bytes:
+      manifest.database.bytes +
+      (manifest.blobs ?? []).reduce((sum, blob) => sum + blob.bytes, 0),
     directory: realpathSync(directory),
     recordVersion: 1,
   };
 }
 export function copyBackup(source: string, target: string): BackupManifest {
   const manifest = readBackup(source);
+  copyBlobFiles(source, target, manifest.blobs ?? []);
   copyFileSync(
     path.join(source, "project.sqlite"),
     path.join(target, "project.sqlite"),

@@ -229,11 +229,12 @@ class WindowsWire extends EventEmitter implements Wire {
         if (this.closed || Date.now() > deadline)
           throw new RiloomError("RESOURCE_BUSY", "本地连接写入超时");
         const written = [0];
+        const length = Math.min(65536, data.length - offset);
         if (
           !win().write(
             this.handle,
-            data.subarray(offset),
-            data.length - offset,
+            data.subarray(offset, offset + length),
+            length,
             written,
             null,
           )
