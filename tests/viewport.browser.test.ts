@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from "vitest";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type BrowserServer } from "playwright";
 import { PNG } from "pngjs";
 import path from "node:path";
 import {
@@ -17,16 +17,26 @@ import {
 let directory: string | undefined,
   service: RunningService | undefined,
   browser: Browser | undefined,
+  browserServer: BrowserServer | undefined,
   client: RiloomClient | undefined;
 afterEach(async () => {
-  if (browser) {
-    for (const context of browser.contexts()) await context.close();
-    await browser.close();
+  try {
+    if (browser)
+      for (const context of browser.contexts()) await context.close();
+  } finally {
+    await browserServer?.kill();
+    if (browserServer) {
+      const process = browserServer.process();
+      expect(process.exitCode !== null || process.signalCode !== null).toBe(
+        true,
+      );
+    }
+    client?.close();
+    await service?.close();
+    if (directory) removeDirectory(directory);
   }
-  client?.close();
-  await service?.close();
-  if (directory) removeDirectory(directory);
 });
+
 function image(
   red: number,
   green: number,
@@ -62,7 +72,7 @@ it("imports PNG through Studio and renders real WebGL layers with linear alpha",
     ),
   );
   const projectId = created.result.projectId as string;
-  browser = await chromium.launch({
+  browserServer = await chromium.launchServer({
     headless: true,
     ...(process.env.RILOOM_TEST_CHROMIUM
       ? { executablePath: process.env.RILOOM_TEST_CHROMIUM }
@@ -73,6 +83,7 @@ it("imports PNG through Studio and renders real WebGL layers with linear alpha",
       "--enable-unsafe-swiftshader",
     ],
   });
+  browser = await chromium.connect(browserServer.wsEndpoint());
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
   });
