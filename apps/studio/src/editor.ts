@@ -69,6 +69,7 @@ export class Editor {
   private base: ProjectModel | null = null;
   private viewGeneration = 0;
   private opening = false;
+  private rebasing = false;
   private baseRevision = 0;
   private baseHash: ProjectState["stateHash"] | null = null;
   private draftId: string = crypto.randomUUID();
@@ -174,6 +175,7 @@ export class Editor {
   async open(projectId: string): Promise<void> {
     if (
       this.opening ||
+      this.rebasing ||
       this.importPending ||
       this.state.applying ||
       this.state.rechecking ||
@@ -286,7 +288,7 @@ export class Editor {
     assets = this.state.assets,
     drawItems = this.state.drawItems,
   ) {
-    if (this.pendingImport) return false;
+    if (this.importPending || this.rebasing) return false;
     if (
       this.state.loading ||
       this.state.recovering ||
@@ -394,6 +396,7 @@ export class Editor {
     if (
       !this.state.project ||
       this.opening ||
+      this.rebasing ||
       this.state.loading ||
       this.state.applying ||
       this.state.rechecking ||
@@ -540,6 +543,7 @@ export class Editor {
     if (
       !this.state.project ||
       this.importPending ||
+      this.rebasing ||
       (!this.changes().length && !this.pendingApplication) ||
       this.state.applying
     )
@@ -633,6 +637,7 @@ export class Editor {
     if (
       !this.state.project ||
       this.importPending ||
+      this.rebasing ||
       this.state.applying ||
       this.state.loading
     )
@@ -645,6 +650,7 @@ export class Editor {
       if (
         view !== this.viewGeneration ||
         this.importPending ||
+        this.rebasing ||
         this.state.applying ||
         this.state.loading ||
         project.revision < this.state.project!.revision
@@ -682,15 +688,19 @@ export class Editor {
     if (
       !this.state.project ||
       !this.base ||
+      this.opening ||
+      this.rebasing ||
+      this.importPending ||
       this.state.applying ||
       this.state.rechecking ||
       this.state.loading
     )
       return;
-    if (this.pendingImport) return;
-    if (this.savePromise) await this.savePromise;
-    const changes = this.changes();
+    this.rebasing = true;
+    this.publish({ loading: true, error: null });
     try {
+      if (this.savePromise) await this.savePromise;
+      const changes = this.changes();
       const project = (
         await this.call("riloom.project.open", {
           projectId: this.state.project.model.projectId,
@@ -780,14 +790,18 @@ export class Editor {
         }
       }
       this.acceptProject(project);
-      this.edited(
-        rebased.parameters,
-        rebased.assets ?? [],
-        rebased.drawItems ?? [],
-      );
+      this.publish({
+        parameters: rebased.parameters,
+        assets: rebased.assets ?? [],
+        drawItems: rebased.drawItems ?? [],
+        generation: this.state.generation + 1,
+      });
       await this.save();
     } catch (error) {
       this.showError(error);
+    } finally {
+      this.rebasing = false;
+      this.publish({ loading: false });
     }
   }
   async navigate(direction: "undo" | "redo"): Promise<void> {

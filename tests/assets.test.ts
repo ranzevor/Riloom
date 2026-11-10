@@ -782,3 +782,109 @@ it("releases import preparation after the initial save fails", async () => {
   expect(editor.importPending).toBe(false);
   editor.dispose();
 });
+
+it.each(["import", "switch"])(
+  "locks the editing context against %s while rebasing",
+  async (operation) => {
+    const { test, projectId } = setup();
+    const other = test.create("另一工程", "rebase-other.riloom").projectId;
+    let release!: () => void;
+    let started!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let holdRebase = false;
+    let imports = 0;
+    const values = new Map<string, string>();
+    const editor = new Editor(
+      async (input) => {
+        const receipt = test.execute(input);
+        if (input.command === "riloom.project.open" && holdRebase) {
+          holdRebase = false;
+          started();
+          await barrier;
+        }
+        if (input.command === "riloom.asset.import") imports++;
+        return receipt;
+      },
+      test.store.workspaceId,
+      {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => {
+          values.set(key, value);
+        },
+        removeItem: (key) => {
+          values.delete(key);
+        },
+      },
+    );
+    await editor.open(projectId);
+    editor.addParameter();
+    await editor.save();
+    test.apply(projectId, [
+      { type: "addParameter", after: parameter("external") },
+    ]);
+    holdRebase = true;
+    const rebasing = editor.rebase();
+    await waiting;
+    if (operation === "import")
+      await editor.importPng("重准备后的图层", png().toString("base64"));
+    else await editor.open(other);
+    const during = editor.getSnapshot().project!.model.projectId;
+    release();
+    await rebasing;
+    expect(during).toBe(projectId);
+    expect(imports).toBe(0);
+    expect(editor.getSnapshot().project!.model.projectId).toBe(projectId);
+    expect(editor.getSnapshot().parameters).toHaveLength(2);
+    expect(editor.getSnapshot().loading).toBe(false);
+    expect(editor.getSnapshot().error).toBeNull();
+    await editor.importPng("重准备后的图层", png().toString("base64"));
+    await editor.apply();
+    expect(test.project(projectId).model.drawItems).toHaveLength(1);
+    expect(test.project(projectId).model.parameters).toHaveLength(2);
+    expect(test.project(other).model.drawItems).toHaveLength(0);
+    editor.dispose();
+  },
+);
+
+it("releases the rebase context after a failed project read", async () => {
+  const { test, projectId } = setup();
+  let failRead = false;
+  const values = new Map<string, string>();
+  const editor = new Editor(
+    async (input) => {
+      if (input.command === "riloom.project.open" && failRead) {
+        failRead = false;
+        throw new RiloomError("EFFECT_UNRESOLVED", "read interrupted");
+      }
+      return test.execute(input);
+    },
+    test.store.workspaceId,
+    {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+      removeItem: (key) => {
+        values.delete(key);
+      },
+    },
+  );
+  await editor.open(projectId);
+  editor.addParameter();
+  await editor.save();
+  failRead = true;
+  await editor.rebase();
+  expect(editor.getSnapshot().loading).toBe(false);
+  expect(editor.getSnapshot().error).toBeTruthy();
+  await editor.importPng("读取失败后导入", png().toString("base64"));
+  await editor.apply();
+  expect(editor.getSnapshot().error).toBeNull();
+  expect(test.project(projectId).model.drawItems).toHaveLength(1);
+  expect(test.project(projectId).model.parameters).toHaveLength(1);
+  editor.dispose();
+});
