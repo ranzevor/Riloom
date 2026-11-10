@@ -55,10 +55,10 @@ export function removeDirectory(directory: string): void {
     retryDelay: 50,
   });
 }
-export function fixture() {
+export function fixture(sharedLockDirectory?: string) {
   const root = temporaryDirectory(),
     directory = path.join(root, "workspace"),
-    lockDirectory = path.join(root, "locks");
+    lockDirectory = sharedLockDirectory ?? path.join(root, "locks");
   let store: SQLiteWorkspace | undefined;
   let application: Application;
   function open(options: StorageOptions = {}) {

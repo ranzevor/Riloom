@@ -1,6 +1,8 @@
 import { applyChanges } from "@riloom/core";
 import {
   RiloomError,
+  type BackupInfo,
+  type RestorePlan,
   type Candidate,
   type Change,
   type CommandRequest,
@@ -14,6 +16,9 @@ import {
 
 export interface EditorState {
   projects: RegisteredProject[];
+  backups: BackupInfo[];
+  recovering: boolean;
+  backupMessage: string | null;
   project: ProjectState | null;
   parameters: Parameter[];
   selected: string | null;
@@ -37,6 +42,9 @@ export type Execute = (request: CommandRequest) => Promise<Receipt>;
 export class Editor {
   private state: EditorState = {
     projects: [],
+    backups: [],
+    recovering: false,
+    backupMessage: null,
     project: null,
     parameters: [],
     selected: null,
@@ -60,6 +68,7 @@ export class Editor {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private savePromise: Promise<void> | undefined;
   private pendingSave: CommandRequest | null = null;
+  private pendingRestore: CommandRequest | null = null;
   private pendingApplication: {
     prepare: CommandRequest;
     apply?: CommandRequest;
@@ -98,6 +107,9 @@ export class Editor {
       commandVersion: "1.0.0",
       ...(projectId ? { projectId } : { workspaceId: this.workspaceId }),
       arguments: args,
+      ...(projectId && this.state.project?.model.projectId === projectId
+        ? { expectedStorageGeneration: this.state.project.storageGeneration }
+        : {}),
       ...fields,
     });
     if (receipt.status === "failed")
@@ -149,7 +161,13 @@ export class Editor {
     }
   }
   async open(projectId: string): Promise<void> {
-    if (this.opening || this.state.applying || this.state.rechecking) return;
+    if (
+      this.opening ||
+      this.state.applying ||
+      this.state.rechecking ||
+      this.state.recovering
+    )
+      return;
     this.opening = true;
     try {
       if (
@@ -161,7 +179,7 @@ export class Editor {
       }
       this.publish({ loading: true, error: null });
       try {
-        const project = (await this.call("riloom.project.get", {}, projectId))
+        const project = (await this.call("riloom.project.open", { projectId }))
           .result.project as ProjectState;
         this.viewGeneration++;
         this.base = project.model;
@@ -249,6 +267,7 @@ export class Editor {
   private edited(parameters: Parameter[]) {
     if (
       this.state.loading ||
+      this.state.recovering ||
       this.state.applying ||
       this.state.rechecking ||
       !this.state.project
@@ -299,6 +318,7 @@ export class Editor {
             commandVersion: "1.0.0",
             projectId: this.state.project!.model.projectId,
             expectedDraftVersion: this.draftVersion,
+            expectedStorageGeneration: this.state.project!.storageGeneration,
             arguments: {
               draftId: this.draftId,
               editorId: this.editorId,
@@ -356,6 +376,7 @@ export class Editor {
             commandVersion: "1.0.0",
             projectId: this.state.project.model.projectId,
             expectedDraftVersion: this.draftVersion,
+            expectedStorageGeneration: this.state.project!.storageGeneration,
             arguments: { draftId: this.draftId },
           },
         };
@@ -376,6 +397,7 @@ export class Editor {
           commandVersion: "1.0.0",
           projectId: this.state.project.model.projectId,
           expectedDraftVersion: this.draftVersion,
+          expectedStorageGeneration: this.state.project!.storageGeneration,
           expectedRevision: this.state.project.revision,
           expectedStateHash: this.state.project.stateHash,
           arguments: {
@@ -439,6 +461,12 @@ export class Editor {
         project.revision < this.state.project!.revision
       )
         return;
+      if (project.storageGeneration !== this.state.project.storageGeneration) {
+        this.publish({
+          error: "工程已恢复到另一份存储。本次编辑已保留，请重新准备。",
+        });
+        return;
+      }
       if (
         project.revision === this.state.project.revision &&
         project.revision === this.baseRevision
@@ -470,16 +498,13 @@ export class Editor {
       this.state.loading
     )
       return;
-    await this.save();
-    if (this.state.generation !== this.state.savedGeneration) return;
+    if (this.savePromise) await this.savePromise;
     const changes = this.changes();
     try {
       const project = (
-        await this.call(
-          "riloom.project.get",
-          {},
-          this.state.project.model.projectId,
-        )
+        await this.call("riloom.project.open", {
+          projectId: this.state.project.model.projectId,
+        })
       ).result.project as ProjectState;
       const parameters = new Map(
         project.model.parameters.map((parameter) => [
@@ -549,6 +574,117 @@ export class Editor {
       this.showError(error);
     } finally {
       this.publish({ applying: false });
+    }
+  }
+  async refreshBackups(): Promise<void> {
+    const backups: BackupInfo[] = [];
+    let cursor: string | null = null;
+    do {
+      const receipt = await this.call("riloom.project.listBackups", {
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      backups.push(...(receipt.result.items as BackupInfo[]));
+      cursor = receipt.result.nextCursor as string | null;
+    } while (cursor);
+    this.publish({ backups });
+  }
+  async backup(): Promise<void> {
+    if (
+      !this.state.project ||
+      this.state.loading ||
+      this.state.applying ||
+      this.state.rechecking ||
+      this.state.recovering
+    )
+      return;
+    await this.save();
+    if (this.state.generation !== this.state.savedGeneration) return;
+    this.publish({ loading: true, error: null, backupMessage: null });
+    try {
+      const project = this.state.project;
+      await this.call("riloom.project.backup", {
+        projectId: project.model.projectId,
+        expectedRevision: project.revision,
+        expectedStateHash: project.stateHash,
+        expectedStorageGeneration: project.storageGeneration,
+      });
+      await this.refreshBackups();
+      this.publish({ backupMessage: "工程备份已保存" });
+    } catch (error) {
+      this.showError(error);
+    } finally {
+      this.publish({ loading: false });
+    }
+  }
+  async importBackup(directory: string): Promise<void> {
+    if (this.state.loading || this.state.recovering) return;
+    this.publish({ loading: true, error: null, backupMessage: null });
+    try {
+      await this.call("riloom.project.importBackup", { directory });
+      await this.refreshBackups();
+      this.publish({ backupMessage: "备份已导入，可选择恢复" });
+    } catch (error) {
+      this.showError(error);
+    } finally {
+      this.publish({ loading: false });
+    }
+  }
+  async restoreBackup(backupId: string, directory: string): Promise<void> {
+    if (this.state.loading || this.state.applying || this.state.rechecking)
+      return;
+    if (!this.pendingRestore) {
+      await this.save();
+      if (this.state.generation !== this.state.savedGeneration) return;
+    }
+    this.publish({
+      loading: true,
+      recovering: true,
+      error: null,
+      backupMessage: null,
+    });
+    try {
+      if (!this.pendingRestore) {
+        const plan = (
+          await this.call("riloom.project.prepareRestore", { backupId })
+        ).result.plan as RestorePlan;
+        this.pendingRestore = {
+          requestId: crypto.randomUUID(),
+          command: "riloom.project.restore",
+          commandVersion: "1.0.0",
+          workspaceId: this.workspaceId,
+          arguments: {
+            backupId,
+            directory,
+            ...(plan.expectedProject
+              ? { expectedProject: plan.expectedProject }
+              : {}),
+          },
+        };
+      }
+      const receipt = await this.execute(this.pendingRestore);
+      if (receipt.status === "failed")
+        throw new RiloomError(
+          receipt.error!.code,
+          receipt.error!.message,
+          receipt.error!.details,
+        );
+      const projectId = (receipt.result.project as ProjectState).model
+        .projectId;
+      this.pendingRestore = null;
+      this.publish({ recovering: false });
+      await this.refreshProjects();
+      await this.open(projectId);
+      if (!this.state.error)
+        this.publish({ backupMessage: "工程已恢复到新目录" });
+    } catch (error) {
+      if (error instanceof RiloomError && error.code !== "EFFECT_UNRESOLVED") {
+        this.pendingRestore = null;
+        this.publish({ recovering: false });
+      }
+      this.showError(error);
+    } finally {
+      this.publish({ loading: false });
     }
   }
   showError(error: unknown) {

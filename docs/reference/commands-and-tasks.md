@@ -57,6 +57,24 @@ Studio 自动保存最多保留一个在途请求，后续输入在前次保存�
 
 浏览器使用启动链接中的一次性短期凭据建立会话。服务校验回环 Host、同源 Origin、会话 Cookie 和写请求的 CSRF 值。SSE 以 projectId 和 after 订阅，重连优先使用 Last-Event-ID；事件包含工程身份、序号、修订和操作身份。IPC 校验操作系统提供的对端身份，再完成绑定工作区与服务世代的授权握手。
 
+### 工程备份命令
+
+备份操作使用工作区作用域，便于在工程数据损坏时读取备份并恢复登记。全部命令版本为 1.0.0。
+
+| 命令 | 输入 | 返回 |
+| --- | --- | --- |
+| `riloom.project.backup` | projectId、expectedRevision、expectedStateHash、expectedStorageGeneration | result.backup |
+| `riloom.project.listBackups` | 可选 projectId、limit、cursor | 当前工作区的备份列表 |
+| `riloom.project.importBackup` | 显式选择的本地备份 directory | 导入后的 result.backup |
+| `riloom.project.prepareRestore` | backupId | result.plan，包含备份和当前恢复前提 |
+| `riloom.project.restore` | backupId、新 directory、prepareRestore 返回的 expectedProject | 新存储世代的 result.project |
+| `riloom.project.open` | projectId | result.project，同时为当前会话刷新该工程的存储授权 |
+
+expectedProject 包含当前登记的 storageGeneration。当前工程可读时另含 revision 和 stateHash。工程数据损坏时只包含登记世代。工作区没有该工程登记时省略。恢复执行前重新核对这些条件，恢复目录须为工作区内的新 .riloom 目录。
+
+恢复保留 projectId，分配新的 storageGeneration，并原子接替当前工作区登记。工作台在恢复成功后重新打开工程。其他客户端先调用 project.open，再为后续工程写入提供顶层 expectedStorageGeneration。旧世代写入返回 PERMISSION_DENIED，省略存储世代的恢复后写入返回 EFFECT_UNRESOLVED。重复请求先读取已有回执，原成功结果继续可查。
+
+CLI 提供 `backup create --project`、`backup list`、`backup import --source` 和 `backup restore --backup --directory`。所有命令继续使用 `--workspace` 指定工作区。恢复命令先读取当前恢复前提，再提交固定请求。
 ## 2. 写入封套与回执
 
 ### 对象作用域与并发前提

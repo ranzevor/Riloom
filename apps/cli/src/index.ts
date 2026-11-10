@@ -7,7 +7,12 @@ import { randomUUID } from "node:crypto";
 import { RiloomClient } from "@riloom/sdk";
 import { serviceEntryPoint } from "@riloom/service";
 import { runMcp } from "@riloom/mcp";
-import { RiloomError, type CommandRequest } from "@riloom/contracts";
+import {
+  RiloomError,
+  type CommandRequest,
+  type ProjectState,
+  type RestorePlan,
+} from "@riloom/contracts";
 
 async function connect(workspace: string): Promise<RiloomClient> {
   mkdirSync(workspace, { recursive: true });
@@ -77,6 +82,8 @@ async function main(): Promise<void> {
       width: { type: "string" },
       height: { type: "string" },
       project: { type: "string" },
+      backup: { type: "string" },
+      source: { type: "string" },
     },
   });
   if (!values.workspace)
@@ -104,7 +111,82 @@ async function main(): Promise<void> {
       request = JSON.parse(
         readFileSync(values.input, "utf8"),
       ) as CommandRequest;
-    else {
+    else if (positionals[0] === "backup") {
+      const workspaceRequest = (
+        command: string,
+        args: Record<string, unknown>,
+      ): CommandRequest => ({
+        requestId: randomUUID(),
+        command,
+        commandVersion: "1.0.0",
+        workspaceId: client.workspaceId,
+        arguments: args,
+      });
+      const query = async (command: string, args: Record<string, unknown>) => {
+        const receipt = await client.execute(workspaceRequest(command, args));
+        if (receipt.status === "failed")
+          throw new RiloomError(
+            receipt.error!.code,
+            receipt.error!.message,
+            receipt.error!.details,
+          );
+        return receipt.result;
+      };
+      switch (positionals[1]) {
+        case "list":
+          request = workspaceRequest(
+            "riloom.project.listBackups",
+            values.project ? { projectId: values.project } : {},
+          );
+          break;
+        case "create": {
+          if (!values.project)
+            throw new RiloomError("INVALID_INPUT", "请指定要备份的工程");
+          const project = (
+            await query("riloom.project.open", { projectId: values.project })
+          ).project as ProjectState;
+          request = workspaceRequest("riloom.project.backup", {
+            projectId: values.project,
+            expectedRevision: project.revision,
+            expectedStateHash: project.stateHash,
+            expectedStorageGeneration: project.storageGeneration,
+          });
+          break;
+        }
+        case "import":
+          if (!values.source)
+            throw new RiloomError("INVALID_INPUT", "请指定备份目录");
+          request = workspaceRequest("riloom.project.importBackup", {
+            directory: path.resolve(values.source),
+          });
+          break;
+        case "restore": {
+          if (!values.backup || !values.directory)
+            throw new RiloomError(
+              "INVALID_INPUT",
+              "请指定备份和恢复后的工程目录",
+            );
+          const plan = (
+            await query("riloom.project.prepareRestore", {
+              backupId: values.backup,
+            })
+          ).plan as RestorePlan;
+          request = workspaceRequest("riloom.project.restore", {
+            backupId: values.backup,
+            directory: values.directory,
+            ...(plan.expectedProject
+              ? { expectedProject: plan.expectedProject }
+              : {}),
+          });
+          break;
+        }
+        default:
+          throw new RiloomError(
+            "INVALID_INPUT",
+            "请选择 backup create、list、import 或 restore",
+          );
+      }
+    } else {
       const operation = positionals.join(" ");
       const command =
         operation === "project create"
@@ -117,7 +199,7 @@ async function main(): Promise<void> {
       if (!command)
         throw new RiloomError(
           "INVALID_INPUT",
-          "请选择 studio、mcp、project create/list/get、call 或 stop",
+          "请选择 studio、mcp、project create/list/get、backup、call 或 stop",
         );
       request = {
         requestId: randomUUID(),

@@ -49,6 +49,8 @@ pnpm start -- studio --workspace ./.local/workspace
 
 在浏览器中打开命令输出的启动链接，创建工程并添加参数。参数修改会自动保存为草稿，选择“应用草稿”后更新工程；关闭并重新打开工作台可继续编辑。工作区服务由首次调用启动，多个入口共用同一实例。
 
+顶栏“备份与恢复”可创建、导入和恢复工程备份。恢复使用新工程目录，并自动重新打开工程。其他客户端通过重新打开工程接入新的存储世代。
+
 ```sh
 pnpm start -- project list --workspace ./.local/workspace --json
 pnpm start -- mcp --workspace ./.local/workspace

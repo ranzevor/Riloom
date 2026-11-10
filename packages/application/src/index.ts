@@ -32,7 +32,11 @@ export function hashValue(value: unknown): StateHash {
   };
 }
 export function sameHash(a: StateHash, b: StateHash): boolean {
-  return a.algorithm === b.algorithm && a.digest === b.digest;
+  return (
+    a?.algorithm === "sha256" &&
+    b?.algorithm === "sha256" &&
+    a.digest === b.digest
+  );
 }
 function rejectReuse(receipt: Receipt, inputHash: StateHash): Receipt {
   if (!sameHash(receipt.inputHash, inputHash))
@@ -96,6 +100,53 @@ export class Application {
           model,
           directory: args.directory,
         });
+      }
+      if (spec.kind === "maintenance") {
+        return this.workspace.manageBackup({
+          request,
+          inputHash,
+          operationId: randomUUID(),
+        });
+      }
+      if (request.command === "riloom.project.prepareRestore") {
+        return this.receipt(
+          request,
+          inputHash,
+          {
+            plan: this.workspace.prepareRestore(
+              request.arguments.backupId as string,
+            ),
+          },
+          0,
+        );
+      }
+      if (request.command === "riloom.project.open") {
+        const project = this.workspace
+          .openProject(request.arguments.projectId as string)
+          .read((tx) => tx.state());
+        return this.receipt(
+          request,
+          inputHash,
+          { project },
+          project.eventCursor,
+        );
+      }
+      if (request.command === "riloom.project.listBackups") {
+        const collection = this.workspace.listBackups(
+          request.arguments.projectId as string | undefined,
+        );
+        return this.receipt(
+          request,
+          inputHash,
+          this.page(
+            collection.items,
+            collection.version,
+            request,
+            "backups:" + (request.arguments.projectId ?? ""),
+            (item) => item.backupId,
+          ),
+          0,
+        );
       }
       const result =
         request.command === "riloom.workspace.get"
@@ -162,6 +213,24 @@ export class Application {
       let receipt: Receipt;
       try {
         receipt = tx.atomic(() => {
+          if (
+            request.expectedStorageGeneration !== undefined &&
+            request.expectedStorageGeneration !== before.storageGeneration
+          ) {
+            throw new RiloomError(
+              "PERMISSION_DENIED",
+              "工程存储已变化，请重新打开工程",
+            );
+          }
+          if (
+            tx.requiresStorageGeneration() &&
+            request.expectedStorageGeneration === undefined
+          ) {
+            throw new RiloomError(
+              "EFFECT_UNRESOLVED",
+              "请读取恢复后的工程，并以当前存储世代重新准备编辑",
+            );
+          }
           const result = this.edit(tx, request, operationId);
           const after = tx.state();
           const output = this.receipt(

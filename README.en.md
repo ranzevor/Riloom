@@ -49,6 +49,8 @@ pnpm start -- studio --workspace ./.local/workspace
 
 Open the printed launch link in a browser, create a project, and add a parameter. Edits are saved as a draft automatically. Select “应用草稿” to apply the draft, then close and reopen the workbench to continue editing. The first command starts the workspace service, which is shared by all clients.
 
+Use “备份与恢复” in the top bar to create, import, and restore project backups. Restoration publishes a new project directory and reopens it. Other clients reopen the project to use the restored storage generation.
+
 ```sh
 pnpm start -- project list --workspace ./.local/workspace --json
 pnpm start -- mcp --workspace ./.local/workspace

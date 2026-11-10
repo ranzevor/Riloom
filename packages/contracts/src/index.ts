@@ -142,6 +142,7 @@ export interface CommandRequest {
   expectedStateHash?: StateHash;
   expectedDraftVersion?: number;
   expectedHistoryVersion?: number;
+  expectedStorageGeneration?: string;
   arguments: Record<string, unknown>;
 }
 export interface Scope {
@@ -170,6 +171,27 @@ export interface RegisteredProject {
   directory: string;
   storageGeneration: string;
   recordVersion: number;
+}
+export interface BackupInfo {
+  backupId: string;
+  projectId: string;
+  projectName: string;
+  createdAt: string;
+  revision: number;
+  stateHash: StateHash;
+  bytes: number;
+  directory: string;
+  recordVersion: number;
+}
+export interface RestoreExpectation {
+  storageGeneration: string;
+  revision?: number;
+  stateHash?: StateHash;
+}
+export interface RestorePlan {
+  backup: BackupInfo;
+  currentStatus: "registered" | "damaged" | "unregistered";
+  expectedProject?: RestoreExpectation;
 }
 export interface ProjectEvent {
   projectId: string;
@@ -235,6 +257,59 @@ export const commands = {
         height: { type: "integer", minimum: 1, maximum: 32768 },
       }),
     }),
+  },
+  "riloom.project.open": {
+    scope: "workspace",
+    kind: "query",
+    description: "打开工程并刷新当前存储授权",
+    schema: object({ projectId: id }),
+  },
+  "riloom.project.backup": {
+    scope: "workspace",
+    kind: "maintenance",
+    description: "保存工程的一致性备份",
+    schema: object({
+      projectId: id,
+      expectedStorageGeneration: id,
+      expectedRevision: integer,
+      expectedStateHash: hash,
+    }),
+  },
+  "riloom.project.listBackups": {
+    scope: "workspace",
+    kind: "query",
+    description: "列出工作区中的工程备份",
+    schema: object({ ...listArguments.properties, projectId: id }, []),
+  },
+  "riloom.project.importBackup": {
+    scope: "workspace",
+    kind: "maintenance",
+    description: "导入本地备份目录",
+    schema: object({
+      directory: { type: "string", minLength: 1, maxLength: 4096 },
+    }),
+  },
+  "riloom.project.prepareRestore": {
+    scope: "workspace",
+    kind: "query",
+    description: "读取备份及当前恢复前提",
+    schema: object({ backupId: id }),
+  },
+  "riloom.project.restore": {
+    scope: "workspace",
+    kind: "maintenance",
+    description: "从备份恢复工程并接替登记",
+    schema: object(
+      {
+        backupId: id,
+        directory: { type: "string", minLength: 1, maxLength: 120 },
+        expectedProject: object(
+          { storageGeneration: id, revision: integer, stateHash: hash },
+          ["storageGeneration"],
+        ),
+      },
+      ["backupId", "directory"],
+    ),
   },
   "riloom.project.get": {
     scope: "project",
@@ -348,6 +423,7 @@ export const requestSchema = (command: CommandName) => {
       expectedStateHash: hash,
       expectedDraftVersion: integer,
       expectedHistoryVersion: integer,
+      expectedStorageGeneration: id,
       arguments: spec.schema,
     },
   };

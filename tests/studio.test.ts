@@ -172,4 +172,58 @@ it("runs the Studio entry point and saves form input through the HTTP service", 
   expect(state.revision).toBe(1);
   expect(state.model.parameters).toMatchObject([{ name: "呼吸", value: 0.5 }]);
   expect(document.querySelector(".error")).toBeNull();
+
+  const openBackups = () =>
+    [...document.querySelectorAll<HTMLButtonElement>(".header-actions button")]
+      .find((item) => item.textContent === "备份与恢复")!
+      .click();
+  const panelButton = (label: string) =>
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(".backup-panel button"),
+    ].find((item) => item.textContent === label)!;
+  openBackups();
+  await vi.waitFor(() =>
+    expect(document.querySelector(".backup-panel")).not.toBeNull(),
+  );
+  panelButton("备份当前工程").click();
+  await vi.waitFor(() =>
+    expect(document.querySelector(".backup-message")?.textContent).toBe(
+      "工程备份已保存",
+    ),
+  );
+  (
+    document.querySelector('[aria-label="关闭备份与恢复"]') as HTMLButtonElement
+  ).click();
+  enter(
+    document.querySelectorAll<HTMLInputElement>(".properties input")[5]!,
+    "0.75",
+  );
+  button("应用草稿").click();
+  await vi.waitFor(() =>
+    expect(document.querySelector(".save-state")?.textContent).toBe(
+      "工程已保存",
+    ),
+  );
+  openBackups();
+  await vi.waitFor(() =>
+    expect(panelButton("恢复选定备份").disabled).toBe(false),
+  );
+  panelButton("恢复选定备份").click();
+  await vi.waitFor(() =>
+    expect(document.querySelector(".backup-message")?.textContent).toBe(
+      "工程已恢复到新目录",
+    ),
+  );
+  const reopened = success(
+    await client.execute(
+      request(
+        "riloom.project.open",
+        { projectId },
+        { workspaceId: client.workspaceId },
+      ),
+    ),
+  ).result.project as ProjectState;
+  expect(reopened.revision).toBe(1);
+  expect(reopened.model.parameters[0]!.value).toBe(0.5);
+  expect(reopened.storageGeneration).not.toBe(state.storageGeneration);
 });
