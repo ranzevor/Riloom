@@ -79,6 +79,7 @@ export class Editor {
   private pendingSave: CommandRequest | null = null;
   private pendingRestore: CommandRequest | null = null;
   private pendingImport: CommandRequest | null = null;
+  private importing = false;
   private pendingApplication: {
     prepare: CommandRequest;
     apply?: CommandRequest;
@@ -173,7 +174,7 @@ export class Editor {
   async open(projectId: string): Promise<void> {
     if (
       this.opening ||
-      this.pendingImport ||
+      this.importPending ||
       this.state.applying ||
       this.state.rechecking ||
       this.state.recovering
@@ -387,37 +388,45 @@ export class Editor {
     );
   }
   get importPending() {
-    return this.pendingImport !== null;
+    return this.importing || this.pendingImport !== null;
   }
   async importPng(name: string, pngBase64: string): Promise<void> {
     if (
       !this.state.project ||
+      this.opening ||
       this.state.loading ||
       this.state.applying ||
       this.state.rechecking ||
       this.state.recovering ||
-      this.pendingImport
+      this.importPending
     )
       return;
-    await this.save();
-    if (this.state.generation !== this.state.savedGeneration) return;
-    this.pendingImport ??= {
-      requestId: crypto.randomUUID(),
-      command: "riloom.asset.import",
-      commandVersion: "1.0.0",
-      projectId: this.state.project.model.projectId,
-      expectedDraftVersion: this.draftVersion,
-      expectedStorageGeneration: this.state.project.storageGeneration,
-      arguments: {
-        name,
-        pngBase64,
-        draftId: this.draftId,
-        editorId: this.editorId,
-        baseRevision: this.baseRevision,
-        baseStateHash: this.baseHash,
-      },
-    };
-    await this.retryImport();
+    this.importing = true;
+    this.publish({ loading: true, error: null });
+    try {
+      await this.save();
+      if (this.state.generation !== this.state.savedGeneration) return;
+      this.pendingImport ??= {
+        requestId: crypto.randomUUID(),
+        command: "riloom.asset.import",
+        commandVersion: "1.0.0",
+        projectId: this.state.project.model.projectId,
+        expectedDraftVersion: this.draftVersion,
+        expectedStorageGeneration: this.state.project.storageGeneration,
+        arguments: {
+          name,
+          pngBase64,
+          draftId: this.draftId,
+          editorId: this.editorId,
+          baseRevision: this.baseRevision,
+          baseStateHash: this.baseHash,
+        },
+      };
+      await this.retryImport();
+    } finally {
+      this.importing = false;
+      this.publish({ loading: false });
+    }
   }
   async retryImport(): Promise<void> {
     if (!this.pendingImport || !this.base) return;
@@ -530,7 +539,7 @@ export class Editor {
   async apply(): Promise<void> {
     if (
       !this.state.project ||
-      this.pendingImport ||
+      this.importPending ||
       (!this.changes().length && !this.pendingApplication) ||
       this.state.applying
     )
@@ -623,7 +632,7 @@ export class Editor {
   async refreshCurrent(): Promise<void> {
     if (
       !this.state.project ||
-      this.pendingImport ||
+      this.importPending ||
       this.state.applying ||
       this.state.loading
     )
@@ -635,7 +644,7 @@ export class Editor {
         .result.project as ProjectState;
       if (
         view !== this.viewGeneration ||
-        this.pendingImport ||
+        this.importPending ||
         this.state.applying ||
         this.state.loading ||
         project.revision < this.state.project!.revision

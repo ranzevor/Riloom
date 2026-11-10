@@ -662,3 +662,123 @@ it.each(["before refresh", "during refresh"])(
     expect(editor.getSnapshot().error).toBeNull();
   },
 );
+
+it.each(["import first", "switch first"])(
+  "serializes project switching and import preparation when started %s",
+  async (order) => {
+    const { test, projectId } = setup();
+    const other = test.create("另一个工程", "other.riloom").projectId;
+    let releaseSave!: () => void;
+    let saveStarted!: () => void;
+    let releaseImport!: () => void;
+    let importStarted!: () => void;
+    const saveBarrier = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const saving = new Promise<void>((resolve) => {
+      saveStarted = resolve;
+    });
+    const importBarrier = new Promise<void>((resolve) => {
+      releaseImport = resolve;
+    });
+    const uploading = new Promise<void>((resolve) => {
+      importStarted = resolve;
+    });
+    let imports = 0;
+    const values = new Map<string, string>();
+    const editor = new Editor(
+      async (input) => {
+        if (input.command === "riloom.project.saveDraft") {
+          saveStarted();
+          await saveBarrier;
+        }
+        const receipt = test.execute(input);
+        if (input.command === "riloom.asset.import") {
+          imports++;
+          if (order === "import first") {
+            importStarted();
+            await importBarrier;
+          }
+        }
+        return receipt;
+      },
+      test.store.workspaceId,
+      {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => {
+          values.set(key, value);
+        },
+        removeItem: (key) => {
+          values.delete(key);
+        },
+      },
+    );
+    await editor.open(projectId);
+    editor.addParameter();
+    const first =
+      order === "import first"
+        ? editor.importPng("原工程图层", png().toString("base64"))
+        : editor.open(other);
+    await saving;
+    const second =
+      order === "import first"
+        ? editor.open(other)
+        : editor.importPng("原工程图层", png().toString("base64"));
+    releaseSave();
+    if (order === "import first") {
+      await uploading;
+      await second;
+      releaseImport();
+    }
+    await Promise.all([first, second]);
+    expect(editor.importPending).toBe(false);
+    expect(editor.getSnapshot().error).toBeNull();
+    if (order === "import first") {
+      expect(imports).toBe(1);
+      expect(editor.getSnapshot().project!.model.projectId).toBe(projectId);
+      expect(editor.getSnapshot().drawItems).toMatchObject([
+        { name: "原工程图层" },
+      ]);
+      await editor.apply();
+      expect(test.project(projectId).model.drawItems).toHaveLength(1);
+      await editor.open(other);
+    } else expect(imports).toBe(0);
+    expect(editor.getSnapshot().project!.model.projectId).toBe(other);
+    expect(editor.getSnapshot().drawItems).toHaveLength(0);
+    expect(editor.getSnapshot().parameters).toHaveLength(0);
+    expect(test.project(other).model.drawItems).toHaveLength(0);
+    editor.dispose();
+  },
+);
+
+it("releases import preparation after the initial save fails", async () => {
+  const { test, projectId } = setup();
+  const values = new Map<string, string>();
+  const editor = new Editor(
+    async (input) => test.execute(input),
+    test.store.workspaceId,
+    {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+      removeItem: (key) => {
+        values.delete(key);
+      },
+    },
+  );
+  await editor.open(projectId);
+  editor.addParameter();
+  const id = editor.getSnapshot().selected!;
+  editor.updateParameter(id, { value: 2 });
+  await editor.importPng("重新导入", png().toString("base64"));
+  expect(editor.importPending).toBe(false);
+  expect(editor.getSnapshot().loading).toBe(false);
+  expect(editor.getSnapshot().error).toBeTruthy();
+  editor.updateParameter(id, { value: 0 });
+  await editor.importPng("重新导入", png().toString("base64"));
+  expect(editor.getSnapshot().error).toBeNull();
+  expect(editor.getSnapshot().drawItems).toMatchObject([{ name: "重新导入" }]);
+  expect(editor.importPending).toBe(false);
+  editor.dispose();
+});
